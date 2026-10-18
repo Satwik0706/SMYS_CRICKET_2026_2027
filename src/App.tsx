@@ -55,6 +55,20 @@ export function App() {
 
   useEffect(() => {
     store.autoSyncFromCloud();
+
+    const handleSync = () => {
+      store.autoSyncFromCloud();
+    };
+
+    window.addEventListener('focus', handleSync);
+    window.addEventListener('online', handleSync);
+    const interval = setInterval(handleSync, 6000);
+
+    return () => {
+      window.removeEventListener('focus', handleSync);
+      window.removeEventListener('online', handleSync);
+      clearInterval(interval);
+    };
   }, [currentPortal]);
 
   const isDarkPortal = currentPortal === 'live';

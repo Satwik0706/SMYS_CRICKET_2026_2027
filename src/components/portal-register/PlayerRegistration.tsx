@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Link as LinkIcon,
@@ -84,6 +84,10 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    store.autoSyncFromCloud();
+  }, []);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -146,8 +150,18 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
+    if (isUploadingPhoto) {
+      alert('Please wait for your photograph to finish uploading.');
+      return;
+    }
 
     setIsSubmitting(true);
+    setErrors((prev) => {
+      const copy = { ...prev };
+      delete copy.form;
+      return copy;
+    });
+
     try {
       const registered = await store.registerPlayer({
         fullName: fullName.trim(),
@@ -166,6 +180,11 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
       });
 
       setSubmittedPlayer(registered);
+    } catch (err: any) {
+      console.error('Registration submission error:', err);
+      const msg = err.message || 'Failed to submit registration. Please check your network connection and try again.';
+      setErrors((prev) => ({ ...prev, form: msg }));
+      alert(`Registration Notice: ${msg}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -797,6 +816,13 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
             </div>
 
             {/* Submit Bar */}
+            {errors.form && (
+              <div className="mx-6 sm:mx-8 my-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{errors.form}</span>
+              </div>
+            )}
+
             <div className="p-6 sm:p-8 bg-[#F7F3EA] border-t border-[#E8E1D3] flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center space-x-2 text-xs text-slate-600">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -805,13 +831,18 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isUploadingPhoto}
                 className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white font-black text-xs uppercase tracking-wider shadow-md shadow-amber-500/20 hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>Syncing with Cloud...</span>
+                  </>
+                ) : isUploadingPhoto ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Uploading Photo...</span>
                   </>
                 ) : (
                   <>

@@ -628,58 +628,158 @@ export class TournamentStore {
     this.notify();
   }
 
+  public getFullState() {
+    return {
+      players: this.players,
+      teams: this.teams,
+      tiers: this.tiers,
+      config: this.config,
+      auctionState: this.auctionState,
+      bids: this.bids,
+      sales: this.sales,
+      auditLogs: this.auditLogs,
+    };
+  }
+
+  public async getNextAvailableRegNumber(): Promise<string> {
+    let maxSeq = 0;
+
+    // 1. Check local in-memory players
+    for (const p of this.players) {
+      const match = p.regNumber?.match(/SMYS-2026-(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    }
+
+    // 2. Query Supabase directly for ground-truth registered numbers across all devices
+    const client = getSupabase();
+    if (client) {
+      try {
+        const { data, error } = await client
+          .from('player_registrations')
+          .select('reg_number');
+        if (!error && Array.isArray(data)) {
+          for (const row of data) {
+            const match = row.reg_number?.match(/SMYS-2026-(\d+)/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (!isNaN(num) && num > maxSeq) {
+                maxSeq = num;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not query Supabase for max registration sequence:', err);
+      }
+    }
+
+    const nextSeq = maxSeq + 1;
+    return `SMYS-2026-${String(nextSeq).padStart(3, '0')}`;
+  }
+
   // --- Registration Actions ---
 
   public async registerPlayer(
     data: Omit<PlayerRegistration, 'id' | 'regNumber' | 'status' | 'createdAt'>
   ): Promise<PlayerRegistration> {
-    const nextSeq = this.players.length + 1;
-    const regNumber = `SMYS-2026-${String(nextSeq).padStart(3, '0')}`;
-    const newPlayer: PlayerRegistration = {
-      ...data,
-      id: `ply-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      regNumber,
-      status: 'pending',
-      createdAt: new Date().toLocaleString(),
-    };
-
-    this.players.unshift(newPlayer);
-    this.addAuditLog('New Registration Submitted', newPlayer.fullName, `Player registered with ID ${regNumber}`);
-    this.saveToStorage();
-    this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
-
     const client = getSupabase();
-    if (client) {
-      try {
-        const { error } = await client.from('player_registrations').upsert({
-          id: newPlayer.id,
-          reg_number: newPlayer.regNumber,
-          full_name: newPlayer.fullName,
-          academic_year: newPlayer.academicYear,
-          phone: newPlayer.phone,
-          matches_played: newPlayer.matchesPlayed,
-          runs_scored: newPlayer.runsScored,
-          wickets_taken: newPlayer.wicketsTaken,
-          playing_role: newPlayer.playingRole,
-          batting_rating: newPlayer.battingRating,
-          bowling_rating: newPlayer.bowlingRating,
-          wicketkeeping_rating: newPlayer.wicketkeepingRating,
-          batting_style: newPlayer.battingStyle,
-          bowling_style: newPlayer.bowlingStyle,
-          photo_url: newPlayer.photoUrl,
-          status: newPlayer.status,
-        });
-        if (error) {
-          console.error('Supabase player_registrations upsert error:', error);
-        } else {
-          console.log('Player registration synced to Supabase Cloud:', newPlayer.regNumber);
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    let lastError: any = null;
+
+    let currentRegNum = await this.getNextAvailableRegNumber();
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      const playerId = `ply-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const newPlayer: PlayerRegistration = {
+        ...data,
+        id: playerId,
+        regNumber: currentRegNum,
+        status: 'pending',
+        createdAt: new Date().toLocaleString(),
+      };
+
+      if (client) {
+        try {
+          const { error } = await client.from('player_registrations').insert({
+            id: newPlayer.id,
+            reg_number: newPlayer.regNumber,
+            full_name: newPlayer.fullName,
+            academic_year: newPlayer.academicYear,
+            phone: newPlayer.phone,
+            matches_played: newPlayer.matchesPlayed,
+            runs_scored: newPlayer.runsScored,
+            wickets_taken: newPlayer.wicketsTaken,
+            playing_role: newPlayer.playingRole,
+            batting_rating: newPlayer.battingRating,
+            bowling_rating: newPlayer.bowlingRating,
+            wicketkeeping_rating: newPlayer.wicketkeepingRating,
+            batting_style: newPlayer.battingStyle,
+            bowling_style: newPlayer.bowlingStyle,
+            photo_url: newPlayer.photoUrl,
+            status: newPlayer.status,
+          });
+
+          if (error) {
+            // Check if duplicate key violation (code 23505) or unique constraint on reg_number
+            if (
+              error.code === '23505' ||
+              error.message?.includes('duplicate key') ||
+              error.message?.includes('unique constraint') ||
+              error.message?.includes('reg_number')
+            ) {
+              console.warn(`Registration sequence collision for ${currentRegNum}, incrementing... (attempt ${attempts})`);
+              const match = currentRegNum.match(/SMYS-2026-(\d+)/i);
+              const num = match ? parseInt(match[1], 10) : 1;
+              currentRegNum = `SMYS-2026-${String(num + 1).padStart(3, '0')}`;
+              continue;
+            }
+            lastError = error;
+            console.error('Supabase player_registrations insert error:', error);
+            throw new Error(error.message || 'Database error occurred during registration');
+          }
+
+          // Insert succeeded in Supabase Cloud!
+          console.log('Player registration successfully saved to Supabase Cloud:', newPlayer.regNumber, newPlayer.fullName);
+          this.players.unshift(newPlayer);
+          this.addAuditLog('New Registration Submitted', newPlayer.fullName, `Player registered with ID ${newPlayer.regNumber}`);
+          this.saveToStorage();
+          this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
+          this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+          return newPlayer;
+        } catch (err: any) {
+          lastError = err;
+          if (
+            err.code === '23505' ||
+            err.message?.includes('duplicate key') ||
+            err.message?.includes('unique constraint') ||
+            err.message?.includes('reg_number')
+          ) {
+            const match = currentRegNum.match(/SMYS-2026-(\d+)/i);
+            const num = match ? parseInt(match[1], 10) : 1;
+            currentRegNum = `SMYS-2026-${String(num + 1).padStart(3, '0')}`;
+            continue;
+          }
+          throw err;
         }
-      } catch (err) {
-        console.error('Network error during Supabase player registration:', err);
+      } else {
+        // Fallback when client is null (e.g. offline mode)
+        this.players.unshift(newPlayer);
+        this.addAuditLog('New Registration Submitted (Offline)', newPlayer.fullName, `Player registered with ID ${newPlayer.regNumber}`);
+        this.saveToStorage();
+        this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
+        return newPlayer;
       }
     }
 
-    return newPlayer;
+    throw new Error(lastError?.message || 'Failed to generate unique registration number after multiple attempts. Please try again.');
   }
 
   public verifyPlayer(playerId: string, status: RegistrationStatus, notes?: string, adminName: string = 'Chief Administrator') {
@@ -698,6 +798,7 @@ export class TournamentStore {
     );
     this.saveToStorage();
     this.broadcastRealtime('PLAYER_UPDATED', player);
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
 
     const client = getSupabase();
     if (client) {
@@ -741,6 +842,7 @@ export class TournamentStore {
     this.addAuditLog('Player Deleted', 'Administrator', `Deleted player ${playerName}`);
     this.saveToStorage();
     this.broadcastRealtime('PLAYER_DELETED', { playerId });
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
 
     const client = getSupabase();
     if (client) {
@@ -750,47 +852,99 @@ export class TournamentStore {
     return { success: true, message: `Player "${playerName}" deleted successfully` };
   }
 
-  public addPlayerByAdmin(data: Omit<PlayerRegistration, 'id' | 'regNumber' | 'createdAt'>): PlayerRegistration {
-    const nextSeq = this.players.length + 1;
-    const regNumber = `SMYS-2026-${String(nextSeq).padStart(3, '0')}`;
-    const newPlayer: PlayerRegistration = {
-      ...data,
-      id: `ply-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      regNumber,
-      createdAt: new Date().toLocaleString(),
-    };
-    this.players.unshift(newPlayer);
-    this.addAuditLog('Player Added by Admin', 'Administrator', `Directly added player ${newPlayer.fullName} (${regNumber})`);
-    this.saveToStorage();
-    this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
-
+  public async addPlayerByAdmin(
+    data: Omit<PlayerRegistration, 'id' | 'regNumber' | 'createdAt'>
+  ): Promise<PlayerRegistration> {
     const client = getSupabase();
-    if (client) {
-      safeSync(
-        client.from('player_registrations').upsert({
-          id: newPlayer.id,
-          reg_number: newPlayer.regNumber,
-          full_name: newPlayer.fullName,
-          academic_year: newPlayer.academicYear,
-          phone: newPlayer.phone,
-          matches_played: newPlayer.matchesPlayed,
-          runs_scored: newPlayer.runsScored,
-          wickets_taken: newPlayer.wicketsTaken,
-          playing_role: newPlayer.playingRole,
-          batting_rating: newPlayer.battingRating,
-          bowling_rating: newPlayer.bowlingRating,
-          wicketkeeping_rating: newPlayer.wicketkeepingRating,
-          batting_style: newPlayer.battingStyle,
-          bowling_style: newPlayer.bowlingStyle,
-          photo_url: newPlayer.photoUrl,
-          status: newPlayer.status,
-          verification_notes: newPlayer.verificationNotes || null,
-          verified_by: newPlayer.verifiedBy || null,
-        })
-      );
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    let lastError: any = null;
+
+    let currentRegNum = await this.getNextAvailableRegNumber();
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      const playerId = `ply-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const newPlayer: PlayerRegistration = {
+        ...data,
+        id: playerId,
+        regNumber: currentRegNum,
+        createdAt: new Date().toLocaleString(),
+      };
+
+      if (client) {
+        try {
+          const { error } = await client.from('player_registrations').insert({
+            id: newPlayer.id,
+            reg_number: newPlayer.regNumber,
+            full_name: newPlayer.fullName,
+            academic_year: newPlayer.academicYear,
+            phone: newPlayer.phone,
+            matches_played: newPlayer.matchesPlayed,
+            runs_scored: newPlayer.runsScored,
+            wickets_taken: newPlayer.wicketsTaken,
+            playing_role: newPlayer.playingRole,
+            batting_rating: newPlayer.battingRating,
+            bowling_rating: newPlayer.bowlingRating,
+            wicketkeeping_rating: newPlayer.wicketkeepingRating,
+            batting_style: newPlayer.battingStyle,
+            bowling_style: newPlayer.bowlingStyle,
+            photo_url: newPlayer.photoUrl,
+            status: newPlayer.status,
+            verification_notes: newPlayer.verificationNotes || null,
+            verified_by: newPlayer.verifiedBy || null,
+          });
+
+          if (error) {
+            if (
+              error.code === '23505' ||
+              error.message?.includes('duplicate key') ||
+              error.message?.includes('unique constraint') ||
+              error.message?.includes('reg_number')
+            ) {
+              console.warn(`Admin add player sequence collision for ${currentRegNum}, incrementing... (attempt ${attempts})`);
+              const match = currentRegNum.match(/SMYS-2026-(\d+)/i);
+              const num = match ? parseInt(match[1], 10) : 1;
+              currentRegNum = `SMYS-2026-${String(num + 1).padStart(3, '0')}`;
+              continue;
+            }
+            lastError = error;
+            console.error('Supabase admin add player error:', error);
+            throw new Error(error.message || 'Database error occurred during adding player');
+          }
+
+          this.players.unshift(newPlayer);
+          this.addAuditLog('Player Added by Admin', 'Administrator', `Directly added player ${newPlayer.fullName} (${newPlayer.regNumber})`);
+          this.saveToStorage();
+          this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
+          this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+          return newPlayer;
+        } catch (err: any) {
+          lastError = err;
+          if (
+            err.code === '23505' ||
+            err.message?.includes('duplicate key') ||
+            err.message?.includes('unique constraint') ||
+            err.message?.includes('reg_number')
+          ) {
+            const match = currentRegNum.match(/SMYS-2026-(\d+)/i);
+            const num = match ? parseInt(match[1], 10) : 1;
+            currentRegNum = `SMYS-2026-${String(num + 1).padStart(3, '0')}`;
+            continue;
+          }
+          throw err;
+        }
+      } else {
+        this.players.unshift(newPlayer);
+        this.addAuditLog('Player Added by Admin (Local)', 'Administrator', `Directly added player ${newPlayer.fullName} (${newPlayer.regNumber})`);
+        this.saveToStorage();
+        this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
+        return newPlayer;
+      }
     }
 
-    return newPlayer;
+    throw new Error(lastError?.message || 'Failed to generate unique registration number after multiple attempts. Please try again.');
   }
 
   public bulkApprovePending(adminName: string = 'Chief Administrator') {
@@ -806,16 +960,21 @@ export class TournamentStore {
     if (count > 0) {
       this.addAuditLog('Bulk Player Verification', adminName, `Approved ${count} pending registrations`);
       this.saveToStorage();
-      this.broadcastRealtime('FULL_STATE_SYNC', {
-        players: this.players,
-        teams: this.teams,
-        tiers: this.tiers,
-        config: this.config,
-        auctionState: this.auctionState,
-        bids: this.bids,
-        sales: this.sales,
-        auditLogs: this.auditLogs,
-      });
+      this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+
+      const client = getSupabase();
+      if (client) {
+        safeSync(
+          client
+            .from('player_registrations')
+            .update({
+              status: 'verified',
+              verified_by: adminName,
+              verified_at: new Date().toISOString(),
+            })
+            .eq('status', 'pending')
+        );
+      }
     }
   }
 

@@ -35,10 +35,16 @@ export const PlayerVerification: React.FC = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [deletingPlayer, setDeletingPlayer] = useState<PlayerRegistration | null>(null);
 
-  // Auto-sync from Supabase on component mount
+  // Auto-sync from Supabase on component mount and every 4 seconds for real-time registrations
   useEffect(() => {
     setIsSyncing(true);
     store.autoSyncFromCloud().finally(() => setIsSyncing(false));
+
+    const interval = setInterval(() => {
+      store.autoSyncFromCloud();
+    }, 4000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleManualSync = async () => {
@@ -64,6 +70,7 @@ export const PlayerVerification: React.FC = () => {
   );
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoUploadMsg, setPhotoUploadMsg] = useState<string | null>(null);
+  const [isAddingPlayer, setIsAddingPlayer] = useState(false);
 
   const handleAdminFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -140,36 +147,43 @@ export const PlayerVerification: React.FC = () => {
     }
   };
 
-  const handleDirectAddPlayer = (e: React.FormEvent) => {
+  const handleDirectAddPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFullName.trim()) return;
 
-    store.addPlayerByAdmin({
-      fullName: newFullName.trim(),
-      academicYear: newAcademicYear,
-      phone: newPhone.trim() || '+91 98000 00000',
-      matchesPlayed: newMatches === '' ? 0 : Number(newMatches),
-      runsScored: newRuns === '' ? 0 : Number(newRuns),
-      wicketsTaken: newWickets === '' ? 0 : Number(newWickets),
-      playingRole: newRole,
-      battingRating: newBatRating,
-      bowlingRating: newBowlRating,
-      wicketkeepingRating: newRole === 'Wicket-Keeper' ? newKeepRating : null,
-      battingStyle: 'Right-Handed — Top Order',
-      bowlingStyle: 'Right Arm Medium',
-      photoUrl: newPhotoUrl,
-      status: 'verified', // Directly verified by administrator
-      verifiedBy: 'Chief Administrator',
-      verifiedAt: new Date().toLocaleString(),
-    });
+    setIsAddingPlayer(true);
+    try {
+      await store.addPlayerByAdmin({
+        fullName: newFullName.trim(),
+        academicYear: newAcademicYear,
+        phone: newPhone.trim() || '+91 98000 00000',
+        matchesPlayed: newMatches === '' ? 0 : Number(newMatches),
+        runsScored: newRuns === '' ? 0 : Number(newRuns),
+        wicketsTaken: newWickets === '' ? 0 : Number(newWickets),
+        playingRole: newRole,
+        battingRating: newBatRating,
+        bowlingRating: newBowlRating,
+        wicketkeepingRating: newRole === 'Wicket-Keeper' ? newKeepRating : null,
+        battingStyle: 'Right-Handed — Top Order',
+        bowlingStyle: 'Right Arm Medium',
+        photoUrl: newPhotoUrl,
+        status: 'verified', // Directly verified by administrator
+        verifiedBy: 'Chief Administrator',
+        verifiedAt: new Date().toLocaleString(),
+      });
 
-    setIsAddPlayerModalOpen(false);
-    // Reset form
-    setNewFullName('');
-    setNewPhone('');
-    setNewMatches('');
-    setNewRuns('');
-    setNewWickets('');
+      setIsAddPlayerModalOpen(false);
+      // Reset form
+      setNewFullName('');
+      setNewPhone('');
+      setNewMatches('');
+      setNewRuns('');
+      setNewWickets('');
+    } catch (err: any) {
+      alert('Error adding player: ' + (err.message || 'Please check your connection and try again.'));
+    } finally {
+      setIsAddingPlayer(false);
+    }
   };
 
   return (
@@ -631,9 +645,17 @@ export const PlayerVerification: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-electric hover:bg-electric-hover text-white text-xs font-bold shadow-md"
+                disabled={isAddingPlayer || isUploadingPhoto}
+                className="px-5 py-2 rounded-xl bg-electric hover:bg-electric-hover text-white text-xs font-bold shadow-md disabled:opacity-60 disabled:cursor-not-allowed flex items-center space-x-1.5"
               >
-                Add Player
+                {isAddingPlayer ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Adding to Cloud...</span>
+                  </>
+                ) : (
+                  <span>Add Player</span>
+                )}
               </button>
             </div>
           </form>
