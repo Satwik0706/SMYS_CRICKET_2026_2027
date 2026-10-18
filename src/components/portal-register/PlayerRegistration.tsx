@@ -81,6 +81,7 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
 
   // Status
   const [submittedPlayer, setSubmittedPlayer] = useState<PlayerRegistration | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -142,27 +143,32 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
 
-    const registered = store.registerPlayer({
-      fullName: fullName.trim(),
-      academicYear: academicYear.trim(),
-      phone: phone.trim(),
-      matchesPlayed: matchesPlayed === '' ? 0 : Number(matchesPlayed),
-      runsScored: runsScored === '' ? 0 : Number(runsScored),
-      wicketsTaken: wicketsTaken === '' ? 0 : Number(wicketsTaken),
-      playingRole: (playingRole || 'All-Rounder') as PlayingRole,
-      battingRating: isBattingNA ? 0 : (battingRating ?? 5),
-      bowlingRating: isBowlingNA ? 0 : (bowlingRating ?? 5),
-      wicketkeepingRating: isWicketkeepingNA ? 0 : (wicketkeepingRating ?? 5),
-      battingStyle: (battingStyle || 'NA') as BattingStyle,
-      bowlingStyle: (bowlingStyle || 'NA') as BowlingStyle,
-      photoUrl,
-    });
+    setIsSubmitting(true);
+    try {
+      const registered = await store.registerPlayer({
+        fullName: fullName.trim(),
+        academicYear: academicYear.trim(),
+        phone: phone.trim(),
+        matchesPlayed: matchesPlayed === '' ? 0 : Number(matchesPlayed),
+        runsScored: runsScored === '' ? 0 : Number(runsScored),
+        wicketsTaken: wicketsTaken === '' ? 0 : Number(wicketsTaken),
+        playingRole: (playingRole || 'All-Rounder') as PlayingRole,
+        battingRating: isBattingNA ? 0 : (battingRating ?? 5),
+        bowlingRating: isBowlingNA ? 0 : (bowlingRating ?? 5),
+        wicketkeepingRating: isWicketkeepingNA ? 0 : (wicketkeepingRating ?? 5),
+        battingStyle: (battingStyle || 'NA') as BattingStyle,
+        bowlingStyle: (bowlingStyle || 'NA') as BowlingStyle,
+        photoUrl,
+      });
 
-    setSubmittedPlayer(registered);
+      setSubmittedPlayer(registered);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleResetForm = () => {
@@ -799,10 +805,20 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
 
               <button
                 type="submit"
-                className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white font-black text-xs uppercase tracking-wider shadow-md shadow-amber-500/20 hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2"
+                disabled={isSubmitting}
+                className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white font-black text-xs uppercase tracking-wider shadow-md shadow-amber-500/20 hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>Submit Registration</span>
-                <ArrowRight className="w-4 h-4" />
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Syncing with Cloud...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Submit Registration</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </form>

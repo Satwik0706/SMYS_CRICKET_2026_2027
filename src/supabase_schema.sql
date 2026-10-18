@@ -203,9 +203,8 @@ CREATE POLICY "Allow public all sales" ON sales FOR ALL USING (true) WITH CHECK 
 CREATE POLICY "Allow public all audit_logs" ON audit_logs FOR ALL USING (true) WITH CHECK (true);
 
 -- ====================================================================
--- REALTIME REPLICATION PUBLICATION (LOW-EGRESS OPTIMIZATION)
--- Only stream live auction state, active bids, and hammer sales
--- Prevents streaming heavy registration rows to public spectators
+-- REALTIME REPLICATION PUBLICATION
+-- Stream live auction state, active bids, hammer sales, player registrations, and teams
 -- ====================================================================
 
 DO $$
@@ -225,15 +224,14 @@ BEGIN
   EXCEPTION WHEN duplicate_object THEN NULL;
   END;
 
-  -- Ensure heavy tables are NOT in realtime publication to save egress
   BEGIN
-    ALTER PUBLICATION supabase_realtime DROP TABLE player_registrations;
-  EXCEPTION WHEN undefined_object THEN NULL;
+    ALTER PUBLICATION supabase_realtime ADD TABLE player_registrations;
+  EXCEPTION WHEN duplicate_object THEN NULL;
   END;
 
   BEGIN
-    ALTER PUBLICATION supabase_realtime DROP TABLE teams;
-  EXCEPTION WHEN undefined_object THEN NULL;
+    ALTER PUBLICATION supabase_realtime ADD TABLE teams;
+  EXCEPTION WHEN duplicate_object THEN NULL;
   END;
 END $$;
 

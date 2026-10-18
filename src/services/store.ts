@@ -106,6 +106,9 @@ export class TournamentStore {
 
     // Initialize Supabase realtime listeners if configured
     this.initSupabaseRealtime();
+
+    // Auto-fetch the latest data from Supabase Cloud on startup
+    this.autoSyncFromCloud();
   }
 
   public static getInstance(): TournamentStore {
@@ -126,6 +129,41 @@ export class TournamentStore {
     this.listeners.forEach((fn) => fn());
   }
 
+  public async autoSyncFromCloud() {
+    try {
+      const client = getSupabase();
+      if (!client) return;
+      const res = await pullTournamentDataFromSupabase();
+      if (res.success && res.data) {
+        if (res.data.players && res.data.players.length > 0) {
+          this.players = res.data.players;
+        }
+        if (res.data.teams && res.data.teams.length > 0) {
+          this.teams = res.data.teams;
+        }
+        if (res.data.tiers && res.data.tiers.length > 0) {
+          this.tiers = res.data.tiers;
+        }
+        if (res.data.sales && res.data.sales.length > 0) {
+          this.sales = res.data.sales;
+        }
+        if (res.data.bids && res.data.bids.length > 0) {
+          this.bids = res.data.bids;
+        }
+        if (res.data.auctionState) {
+          this.auctionState = res.data.auctionState;
+        }
+        if (res.data.config) {
+          this.config = { ...this.config, ...res.data.config };
+        }
+        this.recalculateTeamStats();
+        this.saveToStorage(false);
+      }
+    } catch (e) {
+      console.warn('Initial cloud sync notice:', e);
+    }
+  }
+
   public initSupabaseRealtime() {
     if (typeof window === 'undefined' || this.realtimeSubscribed) return;
     const client = getSupabase();
@@ -135,6 +173,102 @@ export class TournamentStore {
       this.realtimeSubscribed = true;
       client
         .channel('smys-live-sync-public')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'player_registrations' },
+          (payload) => {
+            if (payload.eventType === 'INSERT' && payload.new) {
+              const row = payload.new as Record<string, unknown>;
+              if (!this.players.some((p) => p.id === row.id)) {
+                this.players.unshift({
+                  id: row.id as string,
+                  regNumber: row.reg_number as string,
+                  fullName: row.full_name as string,
+                  academicYear: row.academic_year as string,
+                  phone: row.phone as string,
+                  matchesPlayed: Number(row.matches_played || 0),
+                  runsScored: Number(row.runs_scored || 0),
+                  wicketsTaken: Number(row.wickets_taken || 0),
+                  playingRole: row.playing_role as PlayerRegistration['playingRole'],
+                  battingRating: row.batting_rating !== null ? Number(row.batting_rating) : null,
+                  bowlingRating: row.bowling_rating !== null ? Number(row.bowling_rating) : null,
+                  wicketkeepingRating: row.wicketkeeping_rating !== null ? Number(row.wicketkeeping_rating) : null,
+                  battingStyle: (row.batting_style as PlayerRegistration['battingStyle']) || 'NA',
+                  bowlingStyle: (row.bowling_style as PlayerRegistration['bowlingStyle']) || 'NA',
+                  photoUrl: (row.photo_url as string) || '',
+                  status: (row.status as PlayerRegistration['status']) || 'pending',
+                  verificationNotes: (row.verification_notes as string) || undefined,
+                  verifiedBy: (row.verified_by as string) || undefined,
+                  verifiedAt: (row.verified_at as string) || undefined,
+                  assignedTeamId: (row.assigned_team_id as string) || undefined,
+                  createdAt: (row.created_at as string) || new Date().toLocaleString(),
+                });
+                this.saveToStorage(false);
+              }
+            } else if (payload.eventType === 'UPDATE' && payload.new) {
+              const row = payload.new as Record<string, unknown>;
+              const idx = this.players.findIndex((p) => p.id === row.id);
+              if (idx !== -1) {
+                this.players[idx] = {
+                  ...this.players[idx],
+                  status: (row.status as PlayerRegistration['status']) || this.players[idx].status,
+                  verificationNotes: (row.verification_notes as string) || this.players[idx].verificationNotes,
+                  verifiedBy: (row.verified_by as string) || this.players[idx].verifiedBy,
+                  verifiedAt: (row.verified_at as string) || this.players[idx].verifiedAt,
+                  assignedTeamId: (row.assigned_team_id as string) || this.players[idx].assignedTeamId,
+                };
+                this.saveToStorage(false);
+              }
+            } else if (payload.eventType === 'DELETE' && payload.old) {
+              const oldRow = payload.old as Record<string, unknown>;
+              this.players = this.players.filter((p) => p.id !== oldRow.id);
+              this.saveToStorage(false);
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'teams' },
+          (payload) => {
+            if (payload.eventType === 'INSERT' && payload.new) {
+              const row = payload.new as Record<string, unknown>;
+              if (!this.teams.some((t) => t.id === row.id)) {
+                this.teams.push({
+                  id: row.id as string,
+                  teamId: row.team_id as string,
+                  name: row.name as string,
+                  shortName: row.short_name as string,
+                  logo: row.logo as string,
+                  color: row.color as string,
+                  secondaryColor: (row.secondary_color as string) || '#FFFFFF',
+                  captain: row.captain as string,
+                  loginId: row.login_id as string,
+                  passwordHash: row.password_hash as string,
+                  initialPurse: Number(row.initial_purse || 1000000),
+                  remainingPurse: Number(row.remaining_purse || 1000000),
+                  spentPurse: Number(row.spent_purse || 0),
+                  maxSquadSize: Number(row.max_squad_size || 15),
+                  playersCount: Number(row.players_count || 0),
+                  status: (row.status as 'active' | 'disabled') || 'active',
+                });
+                this.saveToStorage(false);
+              }
+            } else if (payload.eventType === 'UPDATE' && payload.new) {
+              const row = payload.new as Record<string, unknown>;
+              const idx = this.teams.findIndex((t) => t.id === row.id);
+              if (idx !== -1) {
+                this.teams[idx] = {
+                  ...this.teams[idx],
+                  name: (row.name as string) || this.teams[idx].name,
+                  shortName: (row.short_name as string) || this.teams[idx].shortName,
+                  captain: (row.captain as string) || this.teams[idx].captain,
+                  status: (row.status as 'active' | 'disabled') || this.teams[idx].status,
+                };
+                this.saveToStorage(false);
+              }
+            }
+          }
+        )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'auction_state' },
@@ -310,7 +444,9 @@ export class TournamentStore {
 
   // --- Registration Actions ---
 
-  public registerPlayer(data: Omit<PlayerRegistration, 'id' | 'regNumber' | 'status' | 'createdAt'>): PlayerRegistration {
+  public async registerPlayer(
+    data: Omit<PlayerRegistration, 'id' | 'regNumber' | 'status' | 'createdAt'>
+  ): Promise<PlayerRegistration> {
     const nextSeq = this.players.length + 1;
     const regNumber = `SMYS-2026-${String(nextSeq).padStart(3, '0')}`;
     const newPlayer: PlayerRegistration = {
@@ -327,8 +463,8 @@ export class TournamentStore {
 
     const client = getSupabase();
     if (client) {
-      safeSync(
-        client.from('player_registrations').upsert({
+      try {
+        const { error } = await client.from('player_registrations').upsert({
           id: newPlayer.id,
           reg_number: newPlayer.regNumber,
           full_name: newPlayer.fullName,
@@ -345,8 +481,15 @@ export class TournamentStore {
           bowling_style: newPlayer.bowlingStyle,
           photo_url: newPlayer.photoUrl,
           status: newPlayer.status,
-        })
-      );
+        });
+        if (error) {
+          console.error('Supabase player_registrations upsert error:', error);
+        } else {
+          console.log('Player registration synced to Supabase Cloud:', newPlayer.regNumber);
+        }
+      } catch (err) {
+        console.error('Network error during Supabase player registration:', err);
+      }
     }
 
     return newPlayer;
