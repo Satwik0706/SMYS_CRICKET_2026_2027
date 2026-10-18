@@ -18,6 +18,8 @@ import {
   getSupabaseCredentials,
   saveSupabaseCredentials,
   testSupabaseConnection,
+  HARDCODED_SUPABASE_URL,
+  HARDCODED_SUPABASE_KEY,
 } from '../../services/supabaseClient';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
 
@@ -25,8 +27,8 @@ export const SupabaseConnector: React.FC = () => {
   const store = useTournamentStore();
   const currentCreds = getSupabaseCredentials();
 
-  const [url, setUrl] = useState(currentCreds.url);
-  const [key, setKey] = useState(currentCreds.key);
+  const [url, setUrl] = useState(currentCreds.url || HARDCODED_SUPABASE_URL);
+  const [key, setKey] = useState(currentCreds.key || HARDCODED_SUPABASE_KEY);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: { tables: boolean; storage: boolean } } | null>(null);
   const [copiedSchema, setCopiedSchema] = useState(false);
@@ -34,28 +36,27 @@ export const SupabaseConnector: React.FC = () => {
 
   const handleTestConnection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim() || !key.trim()) {
-      alert('Please provide both Supabase URL and Anon Key');
-      return;
-    }
+    const targetUrl = url.trim() || HARDCODED_SUPABASE_URL;
+    const targetKey = key.trim() || HARDCODED_SUPABASE_KEY;
 
     setIsTesting(true);
     setTestResult(null);
 
-    const res = await testSupabaseConnection(url.trim(), key.trim());
+    const res = await testSupabaseConnection(targetUrl, targetKey);
     setIsTesting(false);
     setTestResult(res);
 
     if (res.success) {
-      saveSupabaseCredentials(url.trim(), key.trim());
+      saveSupabaseCredentials(targetUrl, targetKey);
       store.initSupabaseRealtime();
+      await store.pullFromCloud();
     }
   };
 
   const handleDisconnect = () => {
     saveSupabaseCredentials('', '');
-    setUrl('');
-    setKey('');
+    setUrl(HARDCODED_SUPABASE_URL);
+    setKey(HARDCODED_SUPABASE_KEY);
     setTestResult(null);
     setSyncStatus(null);
   };
@@ -367,7 +368,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE sales;`;
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://xyzproject.supabase.co"
+              placeholder={HARDCODED_SUPABASE_URL}
               className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-electric"
             />
           </div>

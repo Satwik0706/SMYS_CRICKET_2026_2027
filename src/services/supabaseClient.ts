@@ -14,9 +14,12 @@ const STORAGE_KEY_URL = 'smys_supabase_url';
 const STORAGE_KEY_KEY = 'smys_supabase_anon_key';
 const STORAGE_BUCKET_PHOTOS = 'player-photos';
 
-export const DEFAULT_SUPABASE_URL = 'https://bugtqzvswkgmcrlkhmtc.supabase.co';
-export const DEFAULT_SUPABASE_ANON_KEY =
+export const HARDCODED_SUPABASE_URL = 'https://bugtqzvswkgmcrlkhmtc.supabase.co';
+export const HARDCODED_SUPABASE_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1Z3RxenZzd2tnbWNybGtobXRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyOTc5NzcsImV4cCI6MjEwNzg3Mzk3N30.-CIv4updWbjPb0u0PCTcoTdFn6GY8o8EX7iitQiJ84U';
+
+export const DEFAULT_SUPABASE_URL = HARDCODED_SUPABASE_URL;
+export const DEFAULT_SUPABASE_ANON_KEY = HARDCODED_SUPABASE_KEY;
 
 export function getSupabaseCredentials() {
   const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -25,13 +28,14 @@ export function getSupabaseCredentials() {
   const localUrl = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_URL) : null;
   const localKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_KEY) : null;
 
-  const url = (localUrl || envUrl || DEFAULT_SUPABASE_URL || '').trim();
-  const key = (localKey || envKey || DEFAULT_SUPABASE_ANON_KEY || '').trim();
+  // Use valid localUrl if set, otherwise fallback to HARDCODED credentials
+  const url = (localUrl && localUrl.trim().startsWith('http') ? localUrl : envUrl || HARDCODED_SUPABASE_URL).trim();
+  const key = (localKey && localKey.trim().length > 20 ? localKey : envKey || HARDCODED_SUPABASE_KEY).trim();
 
   return {
     url,
     key,
-    isConfigured: Boolean(url && key),
+    isConfigured: true,
   };
 }
 

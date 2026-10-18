@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -16,6 +16,8 @@ import {
   Trash2,
   UserPlus,
   Upload,
+  RefreshCw,
+  DownloadCloud,
 } from 'lucide-react';
 import { BattingStyle, BowlingStyle, PlayerRegistration, PlayingRole, RegistrationStatus } from '../../types';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
@@ -25,12 +27,25 @@ import { getSupabaseCredentials, uploadPlayerPhotoToSupabase } from '../../servi
 export const PlayerVerification: React.FC = () => {
   const store = useTournamentStore();
 
+  const [isSyncing, setIsSyncing] = useState(false);
   const [filterStatus, setFilterStatus] = useState<RegistrationStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerRegistration | null>(null);
   const [rejectModalPlayer, setRejectModalPlayer] = useState<PlayerRegistration | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [deletingPlayer, setDeletingPlayer] = useState<PlayerRegistration | null>(null);
+
+  // Auto-sync from Supabase on component mount
+  useEffect(() => {
+    setIsSyncing(true);
+    store.autoSyncFromCloud().finally(() => setIsSyncing(false));
+  }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    await store.autoSyncFromCloud();
+    setIsSyncing(false);
+  };
 
   // Direct Add Player Modal state
   const [isAddPlayerModalOpen, setIsAddPlayerModalOpen] = useState(false);
@@ -174,6 +189,16 @@ export const PlayerVerification: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2.5 self-start md:self-auto">
           <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-colors flex items-center space-x-1.5 border border-slate-700"
+            title="Fetch latest registrations directly from Supabase Cloud"
+          >
+            <RefreshCw className={`w-4 h-4 text-cyan-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing...' : 'Sync with Supabase'}</span>
+          </button>
+
+          <button
             onClick={() => setIsAddPlayerModalOpen(true)}
             className="px-4 py-2.5 rounded-xl bg-electric hover:bg-electric-hover text-white font-bold text-xs shadow-md transition-colors flex items-center space-x-1.5"
           >
@@ -233,20 +258,30 @@ export const PlayerVerification: React.FC = () => {
 
       {/* Players Cards Grid / Empty State */}
       {filteredPlayers.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 shadow-sm text-slate-400 max-w-md mx-auto space-y-3">
+        <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 shadow-sm text-slate-400 max-w-md mx-auto space-y-4">
           <UserCheck className="w-12 h-12 mx-auto opacity-30 text-slate-400" />
           <div>
             <p className="text-base font-bold text-slate-700">No Players in Directory</p>
             <p className="text-xs text-slate-400 mt-1">
-              Players can register via the Public Registration Portal (`/register`), or you can add players directly.
+              Players can register via the Public Registration Portal (`/register`), or you can pull existing registrations from Supabase Cloud.
             </p>
           </div>
-          <button
-            onClick={() => setIsAddPlayerModalOpen(true)}
-            className="px-4 py-2 rounded-xl bg-electric text-white text-xs font-bold shadow hover:bg-electric-hover"
-          >
-            Add Player Now
-          </button>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 font-bold text-xs shadow-md hover:brightness-105 transition-all flex items-center justify-center space-x-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Fetching...' : 'Fetch from Supabase Cloud'}</span>
+            </button>
+            <button
+              onClick={() => setIsAddPlayerModalOpen(true)}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-electric text-white text-xs font-bold shadow hover:bg-electric-hover"
+            >
+              Add Player Manually
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

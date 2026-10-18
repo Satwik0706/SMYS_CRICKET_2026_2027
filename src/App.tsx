@@ -53,6 +53,10 @@ export function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  useEffect(() => {
+    store.autoSyncFromCloud();
+  }, [currentPortal]);
+
   const isDarkPortal = currentPortal === 'live';
 
   return (
