@@ -21,6 +21,7 @@ import {
 } from '../data/initialData';
 import { sound } from './soundEffects';
 import confetti from 'canvas-confetti';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import {
   getSupabase,
   pushTournamentDataToSupabase,
@@ -52,9 +53,10 @@ function safeSync(operation: PromiseLike<unknown> | Promise<unknown>) {
 export class TournamentStore {
   private static instance: TournamentStore;
   private channel: BroadcastChannel | null = null;
+  private supabaseChannel: RealtimeChannel | null = null;
   private listeners: Set<() => void> = new Set();
   private timerInterval: number | null = null;
-  private realtimeSubscribed: boolean = false;
+  public isRealtimeConnected: boolean = false;
 
   public players: PlayerRegistration[] = [];
   public teams: Team[] = [];
@@ -102,9 +104,23 @@ export class TournamentStore {
       if (savedAdminAuth === 'true') {
         this.isAdminAuth = true;
       }
+
+      // Re-sync whenever user focuses or returns to tab
+      window.addEventListener('focus', () => {
+        this.autoSyncFromCloud();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.autoSyncFromCloud();
+        }
+      });
+      // Safety heartbeat every 10 seconds to reconcile state across devices
+      window.setInterval(() => {
+        this.autoSyncFromCloud();
+      }, 10000);
     }
 
-    // Initialize Supabase realtime listeners if configured
+    // Initialize Supabase realtime listeners & broadcast channels
     this.initSupabaseRealtime();
 
     // Auto-fetch the latest data from Supabase Cloud on startup
@@ -129,6 +145,23 @@ export class TournamentStore {
     this.listeners.forEach((fn) => fn());
   }
 
+  public broadcastRealtime(event: string, payload: unknown) {
+    if (!this.supabaseChannel) return;
+    try {
+      this.supabaseChannel
+        .send({
+          type: 'broadcast',
+          event,
+          payload,
+        })
+        .catch((err) => {
+          console.warn('Realtime broadcast notice:', err);
+        });
+    } catch (err) {
+      console.warn('Realtime broadcast exception:', err);
+    }
+  }
+
   public async autoSyncFromCloud() {
     try {
       const client = getSupabase();
@@ -144,14 +177,21 @@ export class TournamentStore {
         if (res.data.tiers && res.data.tiers.length > 0) {
           this.tiers = res.data.tiers;
         }
-        if (res.data.sales && res.data.sales.length > 0) {
+        if (res.data.sales) {
           this.sales = res.data.sales;
         }
-        if (res.data.bids && res.data.bids.length > 0) {
+        if (res.data.bids) {
           this.bids = res.data.bids;
         }
         if (res.data.auctionState) {
-          this.auctionState = res.data.auctionState;
+          // Do not clobber active local bidding if cloud happens to be idle/behind
+          if (this.auctionState.status !== 'bidding' || res.data.auctionState.status === 'bidding') {
+            this.auctionState = {
+              ...this.auctionState,
+              ...res.data.auctionState,
+              lastSale: this.auctionState.lastSale || res.data.auctionState.lastSale,
+            };
+          }
         }
         if (res.data.config) {
           this.config = { ...this.config, ...res.data.config };
@@ -165,188 +205,334 @@ export class TournamentStore {
   }
 
   public initSupabaseRealtime() {
-    if (typeof window === 'undefined' || this.realtimeSubscribed) return;
+    if (typeof window === 'undefined') return;
     const client = getSupabase();
     if (!client) return;
 
+    if (this.supabaseChannel) {
+      try {
+        client.removeChannel(this.supabaseChannel);
+      } catch (e) {
+        console.warn('Channel cleanup notice:', e);
+      }
+      this.supabaseChannel = null;
+    }
+
     try {
-      this.realtimeSubscribed = true;
-      client
-        .channel('smys-live-sync-public')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'player_registrations' },
-          (payload) => {
-            if (payload.eventType === 'INSERT' && payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              if (!this.players.some((p) => p.id === row.id)) {
-                this.players.unshift({
-                  id: row.id as string,
-                  regNumber: row.reg_number as string,
-                  fullName: row.full_name as string,
-                  academicYear: row.academic_year as string,
-                  phone: row.phone as string,
-                  matchesPlayed: Number(row.matches_played || 0),
-                  runsScored: Number(row.runs_scored || 0),
-                  wicketsTaken: Number(row.wickets_taken || 0),
-                  playingRole: row.playing_role as PlayerRegistration['playingRole'],
-                  battingRating: row.batting_rating !== null ? Number(row.batting_rating) : null,
-                  bowlingRating: row.bowling_rating !== null ? Number(row.bowling_rating) : null,
-                  wicketkeepingRating: row.wicketkeeping_rating !== null ? Number(row.wicketkeeping_rating) : null,
-                  battingStyle: (row.batting_style as PlayerRegistration['battingStyle']) || 'NA',
-                  bowlingStyle: (row.bowling_style as PlayerRegistration['bowlingStyle']) || 'NA',
-                  photoUrl: (row.photo_url as string) || '',
-                  status: (row.status as PlayerRegistration['status']) || 'pending',
-                  verificationNotes: (row.verification_notes as string) || undefined,
-                  verifiedBy: (row.verified_by as string) || undefined,
-                  verifiedAt: (row.verified_at as string) || undefined,
-                  assignedTeamId: (row.assigned_team_id as string) || undefined,
-                  createdAt: (row.created_at as string) || new Date().toLocaleString(),
-                });
-                this.saveToStorage(false);
-              }
-            } else if (payload.eventType === 'UPDATE' && payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              const idx = this.players.findIndex((p) => p.id === row.id);
-              if (idx !== -1) {
-                this.players[idx] = {
-                  ...this.players[idx],
-                  status: (row.status as PlayerRegistration['status']) || this.players[idx].status,
-                  verificationNotes: (row.verification_notes as string) || this.players[idx].verificationNotes,
-                  verifiedBy: (row.verified_by as string) || this.players[idx].verifiedBy,
-                  verifiedAt: (row.verified_at as string) || this.players[idx].verifiedAt,
-                  assignedTeamId: (row.assigned_team_id as string) || this.players[idx].assignedTeamId,
-                };
-                this.saveToStorage(false);
-              }
-            } else if (payload.eventType === 'DELETE' && payload.old) {
-              const oldRow = payload.old as Record<string, unknown>;
-              this.players = this.players.filter((p) => p.id !== oldRow.id);
+      const ch = client.channel('smys-live-sync-public', {
+        config: {
+          broadcast: { self: false },
+        },
+      });
+
+      // 1. Cross-Device Sub-50ms Realtime Broadcasts
+      ch.on('broadcast', { event: 'AUCTION_STATE' }, (payload) => {
+        if (payload.payload) {
+          const newState = payload.payload as AuctionState;
+          const prevPlayer = this.auctionState.currentPlayerId;
+          this.auctionState = newState;
+          if (newState.currentPlayerId && newState.currentPlayerId !== prevPlayer) {
+            sound.playGavel();
+          }
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'AUCTION_TIMER_TICK' }, (payload) => {
+        if (payload.payload) {
+          const { timerSecondsRemaining, isTimerRunning } = payload.payload as {
+            timerSecondsRemaining: number;
+            isTimerRunning: boolean;
+          };
+          this.auctionState.timerSecondsRemaining = timerSecondsRemaining;
+          this.auctionState.isTimerRunning = isTimerRunning;
+          if (timerSecondsRemaining <= 5 && timerSecondsRemaining > 0) {
+            sound.playTick();
+          }
+          this.notify();
+        }
+      })
+      .on('broadcast', { event: 'NEW_BID' }, (payload) => {
+        if (payload.payload) {
+          const data = payload.payload as { bid: BidRecord; auctionState?: AuctionState };
+          const bid = data.bid;
+          if (bid && !this.bids.some((b) => b.id === bid.id)) {
+            this.bids.unshift(bid);
+          }
+          if (data.auctionState) {
+            this.auctionState = data.auctionState;
+          } else if (bid) {
+            this.auctionState.currentBid = bid.amount;
+            this.auctionState.currentBidderTeamId = bid.teamId;
+            this.auctionState.timerSecondsRemaining = this.config.timerSeconds || 30;
+            this.auctionState.lastBidAt = new Date().toISOString();
+          }
+          sound.playBid();
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'PLAYER_SOLD' }, (payload) => {
+        if (payload.payload) {
+          const data = payload.payload as {
+            sale: SaleRecord;
+            auctionState: AuctionState;
+            team?: Team;
+            playerId?: string;
+          };
+          if (data.sale && !this.sales.some((s) => s.id === data.sale.id)) {
+            this.sales.unshift(data.sale);
+          }
+          if (data.auctionState) {
+            this.auctionState = data.auctionState;
+          }
+          if (data.playerId && data.team) {
+            const player = this.players.find((p) => p.id === data.playerId);
+            if (player) player.assignedTeamId = data.team.id;
+          }
+          this.recalculateTeamStats();
+          sound.playSold();
+          sound.playGavel();
+          this.launchConfetti();
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'PLAYER_UNSOLD' }, (payload) => {
+        if (payload.payload) {
+          this.auctionState = payload.payload as AuctionState;
+          sound.playUnsold();
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'PLAYER_REGISTERED' }, (payload) => {
+        if (payload.payload) {
+          const player = payload.payload as PlayerRegistration;
+          if (!this.players.some((p) => p.id === player.id)) {
+            this.players.unshift(player);
+            this.saveToStorage(false);
+          }
+        }
+      })
+      .on('broadcast', { event: 'PLAYER_UPDATED' }, (payload) => {
+        if (payload.payload) {
+          const player = payload.payload as PlayerRegistration;
+          const idx = this.players.findIndex((p) => p.id === player.id);
+          if (idx !== -1) {
+            this.players[idx] = { ...this.players[idx], ...player };
+            this.saveToStorage(false);
+          }
+        }
+      })
+      .on('broadcast', { event: 'PLAYER_DELETED' }, (payload) => {
+        if (payload.payload) {
+          const { playerId } = payload.payload as { playerId: string };
+          this.players = this.players.filter((p) => p.id !== playerId);
+          this.sales = this.sales.filter((s) => s.playerId !== playerId);
+          this.bids = this.bids.filter((b) => b.playerId !== playerId);
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'TEAMS_UPDATED' }, (payload) => {
+        if (payload.payload && Array.isArray(payload.payload)) {
+          this.teams = payload.payload;
+          this.saveToStorage(false);
+        }
+      })
+      .on('broadcast', { event: 'FULL_STATE_SYNC' }, (payload) => {
+        if (payload.payload) {
+          this.applyExternalState(payload.payload);
+        }
+      });
+
+      // 2. PostgreSQL Replication Listeners (Backup data-stream)
+      ch.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'player_registrations' },
+        (payload) => {
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            if (!this.players.some((p) => p.id === row.id)) {
+              this.players.unshift({
+                id: row.id as string,
+                regNumber: row.reg_number as string,
+                fullName: row.full_name as string,
+                academicYear: row.academic_year as string,
+                phone: row.phone as string,
+                matchesPlayed: Number(row.matches_played || 0),
+                runsScored: Number(row.runs_scored || 0),
+                wicketsTaken: Number(row.wickets_taken || 0),
+                playingRole: row.playing_role as PlayerRegistration['playingRole'],
+                battingRating: row.batting_rating !== null ? Number(row.batting_rating) : null,
+                bowlingRating: row.bowling_rating !== null ? Number(row.bowling_rating) : null,
+                wicketkeepingRating: row.wicketkeeping_rating !== null ? Number(row.wicketkeeping_rating) : null,
+                battingStyle: (row.batting_style as PlayerRegistration['battingStyle']) || 'NA',
+                bowlingStyle: (row.bowling_style as PlayerRegistration['bowlingStyle']) || 'NA',
+                photoUrl: (row.photo_url as string) || '',
+                status: (row.status as PlayerRegistration['status']) || 'pending',
+                verificationNotes: (row.verification_notes as string) || undefined,
+                verifiedBy: (row.verified_by as string) || undefined,
+                verifiedAt: (row.verified_at as string) || undefined,
+                assignedTeamId: (row.assigned_team_id as string) || undefined,
+                createdAt: (row.created_at as string) || new Date().toLocaleString(),
+              });
               this.saveToStorage(false);
             }
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'teams' },
-          (payload) => {
-            if (payload.eventType === 'INSERT' && payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              if (!this.teams.some((t) => t.id === row.id)) {
-                this.teams.push({
-                  id: row.id as string,
-                  teamId: row.team_id as string,
-                  name: row.name as string,
-                  shortName: row.short_name as string,
-                  logo: row.logo as string,
-                  color: row.color as string,
-                  secondaryColor: (row.secondary_color as string) || '#FFFFFF',
-                  captain: row.captain as string,
-                  loginId: row.login_id as string,
-                  passwordHash: row.password_hash as string,
-                  initialPurse: Number(row.initial_purse || 1000000),
-                  remainingPurse: Number(row.remaining_purse || 1000000),
-                  spentPurse: Number(row.spent_purse || 0),
-                  maxSquadSize: Number(row.max_squad_size || 15),
-                  playersCount: Number(row.players_count || 0),
-                  status: (row.status as 'active' | 'disabled') || 'active',
-                });
-                this.saveToStorage(false);
-              }
-            } else if (payload.eventType === 'UPDATE' && payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              const idx = this.teams.findIndex((t) => t.id === row.id);
-              if (idx !== -1) {
-                this.teams[idx] = {
-                  ...this.teams[idx],
-                  name: (row.name as string) || this.teams[idx].name,
-                  shortName: (row.short_name as string) || this.teams[idx].shortName,
-                  captain: (row.captain as string) || this.teams[idx].captain,
-                  status: (row.status as 'active' | 'disabled') || this.teams[idx].status,
-                };
-                this.saveToStorage(false);
-              }
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            const idx = this.players.findIndex((p) => p.id === row.id);
+            if (idx !== -1) {
+              this.players[idx] = {
+                ...this.players[idx],
+                status: (row.status as PlayerRegistration['status']) || this.players[idx].status,
+                verificationNotes: (row.verification_notes as string) || this.players[idx].verificationNotes,
+                verifiedBy: (row.verified_by as string) || this.players[idx].verifiedBy,
+                verifiedAt: (row.verified_at as string) || this.players[idx].verifiedAt,
+                assignedTeamId: (row.assigned_team_id as string) || this.players[idx].assignedTeamId,
+              };
+              this.saveToStorage(false);
             }
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            const oldRow = payload.old as Record<string, unknown>;
+            this.players = this.players.filter((p) => p.id !== oldRow.id);
+            this.saveToStorage(false);
           }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'auction_state' },
-          (payload) => {
-            if (payload.new && (payload.new as Record<string, unknown>).id === 'live_auction') {
-              const row = payload.new as Record<string, unknown>;
-              this.auctionState = {
-                status: row.status as AuctionState['status'],
-                currentPlayerId: (row.current_player_id as string) || null,
-                currentBid: Number(row.current_bid || 0),
-                currentBidderTeamId: (row.current_bidder_team_id as string) || null,
-                timerSecondsRemaining: Number(row.timer_seconds_remaining || 30),
-                isTimerRunning: Boolean(row.is_timer_running),
-                callMode: (row.call_mode as AuctionCallMode) || 'queue',
-                lastSale: this.auctionState.lastSale,
-                lastBidAt: (row.last_bid_at as string) || null,
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'teams' },
+        (payload) => {
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            if (!this.teams.some((t) => t.id === row.id)) {
+              this.teams.push({
+                id: row.id as string,
+                teamId: row.team_id as string,
+                name: row.name as string,
+                shortName: row.short_name as string,
+                logo: row.logo as string,
+                color: row.color as string,
+                secondaryColor: (row.secondary_color as string) || '#FFFFFF',
+                captain: row.captain as string,
+                loginId: row.login_id as string,
+                passwordHash: row.password_hash as string,
+                initialPurse: Number(row.initial_purse || 1000000),
+                remainingPurse: Number(row.remaining_purse || 1000000),
+                spentPurse: Number(row.spent_purse || 0),
+                maxSquadSize: Number(row.max_squad_size || 15),
+                playersCount: Number(row.players_count || 0),
+                status: (row.status as 'active' | 'disabled') || 'active',
+              });
+              this.saveToStorage(false);
+            }
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            const idx = this.teams.findIndex((t) => t.id === row.id);
+            if (idx !== -1) {
+              this.teams[idx] = {
+                ...this.teams[idx],
+                name: (row.name as string) || this.teams[idx].name,
+                shortName: (row.short_name as string) || this.teams[idx].shortName,
+                captain: (row.captain as string) || this.teams[idx].captain,
+                status: (row.status as 'active' | 'disabled') || this.teams[idx].status,
+                spentPurse: row.spent_purse !== undefined ? Number(row.spent_purse) : this.teams[idx].spentPurse,
+                remainingPurse: row.remaining_purse !== undefined ? Number(row.remaining_purse) : this.teams[idx].remainingPurse,
+                playersCount: row.players_count !== undefined ? Number(row.players_count) : this.teams[idx].playersCount,
               };
               this.saveToStorage(false);
             }
           }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'bids' },
-          (payload) => {
-            if (payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              if (!this.bids.some((b) => b.id === row.id)) {
-                this.bids.unshift({
-                  id: row.id as string,
-                  playerId: row.player_id as string,
-                  teamId: row.team_id as string,
-                  teamName: row.team_name as string,
-                  teamLogo: (row.team_logo as string) || '🏏',
-                  teamColor: (row.team_color as string) || '#2563EB',
-                  amount: Number(row.amount),
-                  timestamp: (row.timestamp as string) || new Date().toLocaleTimeString(),
-                });
-                sound.playBid();
-                this.saveToStorage(false);
-              }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'auction_state' },
+        (payload) => {
+          if (payload.new && (payload.new as Record<string, unknown>).id === 'live_auction') {
+            const row = payload.new as Record<string, unknown>;
+            this.auctionState = {
+              status: row.status as AuctionState['status'],
+              currentPlayerId: (row.current_player_id as string) || null,
+              currentBid: Number(row.current_bid || 0),
+              currentBidderTeamId: (row.current_bidder_team_id as string) || null,
+              timerSecondsRemaining: Number(row.timer_seconds_remaining || 30),
+              isTimerRunning: Boolean(row.is_timer_running),
+              callMode: (row.call_mode as AuctionCallMode) || 'queue',
+              lastSale: this.auctionState.lastSale,
+              lastBidAt: (row.last_bid_at as string) || null,
+            };
+            this.saveToStorage(false);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'bids' },
+        (payload) => {
+          if (payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            if (!this.bids.some((b) => b.id === row.id)) {
+              this.bids.unshift({
+                id: row.id as string,
+                playerId: row.player_id as string,
+                teamId: row.team_id as string,
+                teamName: row.team_name as string,
+                teamLogo: (row.team_logo as string) || '🏏',
+                teamColor: (row.team_color as string) || '#2563EB',
+                amount: Number(row.amount),
+                timestamp: (row.timestamp as string) || new Date().toLocaleTimeString(),
+              });
+              sound.playBid();
+              this.saveToStorage(false);
             }
           }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'sales' },
-          (payload) => {
-            if (payload.new) {
-              const row = payload.new as Record<string, unknown>;
-              if (!this.sales.some((s) => s.id === row.id)) {
-                const newSale: SaleRecord = {
-                  id: row.id as string,
-                  playerId: row.player_id as string,
-                  playerName: row.player_name as string,
-                  playerPhoto: row.player_photo as string,
-                  playerRole: row.player_role as SaleRecord['playerRole'],
-                  playerTier: row.player_tier as string,
-                  regNumber: row.reg_number as string,
-                  teamId: row.team_id as string,
-                  teamName: row.team_name as string,
-                  teamLogo: (row.team_logo as string) || '🏆',
-                  teamColor: (row.team_color as string) || '#F5B82E',
-                  finalPrice: Number(row.final_price),
-                  soldAt: row.sold_at as string,
-                };
-                this.sales.unshift(newSale);
-                this.auctionState.lastSale = newSale;
-                this.auctionState.status = 'sold';
-                this.recalculateTeamStats();
-                sound.playSold();
-                this.launchConfetti();
-                this.saveToStorage(false);
-              }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sales' },
+        (payload) => {
+          if (payload.new) {
+            const row = payload.new as Record<string, unknown>;
+            if (!this.sales.some((s) => s.id === row.id)) {
+              const newSale: SaleRecord = {
+                id: row.id as string,
+                playerId: row.player_id as string,
+                playerName: row.player_name as string,
+                playerPhoto: row.player_photo as string,
+                playerRole: row.player_role as SaleRecord['playerRole'],
+                playerTier: row.player_tier as string,
+                regNumber: row.reg_number as string,
+                teamId: row.team_id as string,
+                teamName: row.team_name as string,
+                teamLogo: (row.team_logo as string) || '🏆',
+                teamColor: (row.team_color as string) || '#F5B82E',
+                finalPrice: Number(row.final_price),
+                soldAt: row.sold_at as string,
+              };
+              this.sales.unshift(newSale);
+              this.auctionState.lastSale = newSale;
+              this.auctionState.status = 'sold';
+              this.recalculateTeamStats();
+              sound.playSold();
+              this.launchConfetti();
+              this.saveToStorage(false);
             }
           }
-        )
-        .subscribe();
+        }
+      );
+
+      ch.subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('⚡ Supabase Realtime channel connected & live synchronized!');
+          this.isRealtimeConnected = true;
+          this.notify();
+        } else if (err || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('Supabase Realtime subscription status notice:', status, err);
+          this.isRealtimeConnected = false;
+          this.notify();
+        }
+      });
+
+      this.supabaseChannel = ch;
     } catch (err) {
       console.warn('Supabase realtime init warning:', err);
     }
@@ -460,6 +646,7 @@ export class TournamentStore {
     this.players.unshift(newPlayer);
     this.addAuditLog('New Registration Submitted', newPlayer.fullName, `Player registered with ID ${regNumber}`);
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
 
     const client = getSupabase();
     if (client) {
@@ -510,6 +697,7 @@ export class TournamentStore {
       `Player ${player.fullName} (${player.regNumber}) set to ${status}. Notes: ${notes || 'None'}`
     );
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_UPDATED', player);
 
     const client = getSupabase();
     if (client) {
@@ -552,6 +740,7 @@ export class TournamentStore {
     this.recalculateTeamStats();
     this.addAuditLog('Player Deleted', 'Administrator', `Deleted player ${playerName}`);
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_DELETED', { playerId });
 
     const client = getSupabase();
     if (client) {
@@ -573,6 +762,7 @@ export class TournamentStore {
     this.players.unshift(newPlayer);
     this.addAuditLog('Player Added by Admin', 'Administrator', `Directly added player ${newPlayer.fullName} (${regNumber})`);
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_REGISTERED', newPlayer);
 
     const client = getSupabase();
     if (client) {
@@ -616,6 +806,16 @@ export class TournamentStore {
     if (count > 0) {
       this.addAuditLog('Bulk Player Verification', adminName, `Approved ${count} pending registrations`);
       this.saveToStorage();
+      this.broadcastRealtime('FULL_STATE_SYNC', {
+        players: this.players,
+        teams: this.teams,
+        tiers: this.tiers,
+        config: this.config,
+        auctionState: this.auctionState,
+        bids: this.bids,
+        sales: this.sales,
+        auditLogs: this.auditLogs,
+      });
     }
   }
 
@@ -632,6 +832,7 @@ export class TournamentStore {
     this.teams.push(newTeam);
     this.addAuditLog('Team Created', 'Administrator', `Created team ${newTeam.name} (${newTeam.teamId}) with purse ₹${newTeam.initialPurse.toLocaleString('en-IN')}`);
     this.saveToStorage();
+    this.broadcastRealtime('TEAMS_UPDATED', this.teams);
 
     const client = getSupabase();
     if (client) {
@@ -664,6 +865,7 @@ export class TournamentStore {
     Object.assign(team, updates);
     this.addAuditLog('Team Updated', 'Administrator', `Updated details for ${team.name}`);
     this.saveToStorage();
+    this.broadcastRealtime('TEAMS_UPDATED', this.teams);
 
     const client = getSupabase();
     if (client) {
@@ -705,6 +907,7 @@ export class TournamentStore {
     this.teams.splice(teamIndex, 1);
     this.addAuditLog('Team Deleted', 'Administrator', `Deleted team "${teamName}"`);
     this.saveToStorage();
+    this.broadcastRealtime('TEAMS_UPDATED', this.teams);
 
     const client = getSupabase();
     if (client) {
@@ -832,6 +1035,7 @@ export class TournamentStore {
     this.recalculateTeamStats();
     this.addAuditLog('Player Assigned', 'Administrator', `Player ${player.fullName} assigned to ${teamId || 'Unassigned'}`);
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_UPDATED', player);
   }
 
   public autoAssignTeams() {
@@ -869,6 +1073,17 @@ export class TournamentStore {
     this.recalculateTeamStats();
     this.addAuditLog('Auto Squad Balancing', 'Administrator', `Balanced ${sorted.length} players across ${this.teams.length} teams`);
     this.saveToStorage();
+    this.broadcastRealtime('TEAMS_UPDATED', this.teams);
+    this.broadcastRealtime('FULL_STATE_SYNC', {
+      players: this.players,
+      teams: this.teams,
+      tiers: this.tiers,
+      config: this.config,
+      auctionState: this.auctionState,
+      bids: this.bids,
+      sales: this.sales,
+      auditLogs: this.auditLogs,
+    });
   }
 
   public recalculateTeamStats() {
@@ -941,6 +1156,7 @@ export class TournamentStore {
     this.startTimer();
     this.addAuditLog('Player Called to Auction', 'Auctioneer', `Called ${player.fullName} (${player.regNumber}) - Opening Bid ₹${tier.minBid.toLocaleString('en-IN')}`);
     this.saveToStorage();
+    this.broadcastRealtime('AUCTION_STATE', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1039,6 +1255,7 @@ export class TournamentStore {
 
     this.addAuditLog('New Leading Bid', team.name, `Bid ₹${targetBid.toLocaleString('en-IN')} on ${player.fullName}`);
     this.saveToStorage();
+    this.broadcastRealtime('NEW_BID', { bid: newBid, auctionState: this.auctionState });
 
     const client = getSupabase();
     if (client) {
@@ -1082,6 +1299,7 @@ export class TournamentStore {
     this.auctionState.isTimerRunning = false;
     this.addAuditLog('Auction Paused', 'Auctioneer', 'Paused bidding clock');
     this.saveToStorage();
+    this.broadcastRealtime('AUCTION_STATE', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1095,6 +1313,7 @@ export class TournamentStore {
     this.startTimer();
     this.addAuditLog('Auction Resumed', 'Auctioneer', 'Resumed bidding clock');
     this.saveToStorage();
+    this.broadcastRealtime('AUCTION_STATE', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1113,6 +1332,7 @@ export class TournamentStore {
     sound.playUnsold();
     this.addAuditLog('Player UNSOLD', 'Auctioneer', `${player.fullName} (${player.regNumber}) went unsold`);
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_UNSOLD', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1128,6 +1348,7 @@ export class TournamentStore {
     this.auctionState.currentBidderTeamId = null;
     this.auctionState.isTimerRunning = false;
     this.saveToStorage();
+    this.broadcastRealtime('AUCTION_STATE', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1155,6 +1376,7 @@ export class TournamentStore {
     this.auctionState.isTimerRunning = false;
     this.auctionState.timerSecondsRemaining = this.config.timerSeconds || 30;
     this.saveToStorage();
+    this.broadcastRealtime('AUCTION_STATE', this.auctionState);
 
     const client = getSupabase();
     if (client) {
@@ -1233,6 +1455,7 @@ export class TournamentStore {
     );
 
     this.saveToStorage();
+    this.broadcastRealtime('PLAYER_SOLD', { sale, auctionState: this.auctionState, team, playerId: player.id });
 
     const client = getSupabase();
     if (client) {
@@ -1318,11 +1541,18 @@ export class TournamentStore {
           sound.playTick();
         }
         this.saveToStorage(false);
+        if (this.auctionState.timerSecondsRemaining <= 5 || this.auctionState.timerSecondsRemaining % 3 === 0) {
+          this.broadcastRealtime('AUCTION_TIMER_TICK', {
+            timerSecondsRemaining: this.auctionState.timerSecondsRemaining,
+            isTimerRunning: true,
+          });
+        }
       } else {
         this.auctionState.timerSecondsRemaining = 0;
         this.stopTimer();
         this.auctionState.isTimerRunning = false;
         this.saveToStorage();
+        this.broadcastRealtime('AUCTION_STATE', this.auctionState);
       }
     }, 1000);
   }
@@ -1370,10 +1600,7 @@ export class TournamentStore {
     };
     this.addAuditLog('Demo Data Loaded', 'Administrator', 'Loaded 4 sample teams and 6 verified players for instant demonstration');
     this.saveToStorage();
-  }
-
-  public async pushToCloud(): Promise<{ success: boolean; message: string }> {
-    return await pushTournamentDataToSupabase({
+    this.broadcastRealtime('FULL_STATE_SYNC', {
       players: this.players,
       teams: this.teams,
       tiers: this.tiers,
@@ -1383,6 +1610,32 @@ export class TournamentStore {
       sales: this.sales,
       auditLogs: this.auditLogs,
     });
+  }
+
+  public async pushToCloud(): Promise<{ success: boolean; message: string }> {
+    const res = await pushTournamentDataToSupabase({
+      players: this.players,
+      teams: this.teams,
+      tiers: this.tiers,
+      config: this.config,
+      auctionState: this.auctionState,
+      bids: this.bids,
+      sales: this.sales,
+      auditLogs: this.auditLogs,
+    });
+    if (res.success) {
+      this.broadcastRealtime('FULL_STATE_SYNC', {
+        players: this.players,
+        teams: this.teams,
+        tiers: this.tiers,
+        config: this.config,
+        auctionState: this.auctionState,
+        bids: this.bids,
+        sales: this.sales,
+        auditLogs: this.auditLogs,
+      });
+    }
+    return res;
   }
 
   public async pullFromCloud(): Promise<{ success: boolean; message: string }> {

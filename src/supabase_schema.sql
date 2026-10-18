@@ -207,6 +207,13 @@ CREATE POLICY "Allow public all audit_logs" ON audit_logs FOR ALL USING (true) W
 -- Stream live auction state, active bids, hammer sales, player registrations, and teams
 -- ====================================================================
 
+-- Ensure PostgreSQL replication publishes updates and deletes under Row Level Security:
+ALTER TABLE auction_state REPLICA IDENTITY FULL;
+ALTER TABLE bids REPLICA IDENTITY FULL;
+ALTER TABLE sales REPLICA IDENTITY FULL;
+ALTER TABLE player_registrations REPLICA IDENTITY FULL;
+ALTER TABLE teams REPLICA IDENTITY FULL;
+
 DO $$
 BEGIN
   BEGIN

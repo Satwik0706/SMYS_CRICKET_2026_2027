@@ -245,10 +245,45 @@ CREATE POLICY "Allow all auction_state" ON auction_state FOR ALL USING (true) WI
 CREATE POLICY "Allow all bids" ON bids FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all sales" ON sales FOR ALL USING (true) WITH CHECK (true);
 
--- 4. Realtime Replication (Low-Egress: Only Stream Auction Pulse)
-ALTER PUBLICATION supabase_realtime ADD TABLE auction_state;
-ALTER PUBLICATION supabase_realtime ADD TABLE bids;
-ALTER PUBLICATION supabase_realtime ADD TABLE sales;`;
+-- 4. Realtime Replication & Full Replica Identity (Required for Supabase postgres_changes)
+ALTER TABLE auction_state REPLICA IDENTITY FULL;
+ALTER TABLE bids REPLICA IDENTITY FULL;
+ALTER TABLE sales REPLICA IDENTITY FULL;
+ALTER TABLE player_registrations REPLICA IDENTITY FULL;
+ALTER TABLE teams REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE auction_state; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bids; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE sales; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE player_registrations; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE teams; EXCEPTION WHEN duplicate_object THEN NULL; END;
+END $$;`;
+
+  const replicationOnlySQL = `-- Quick Fix: Enable Realtime Replication & Full Identity on existing tables:
+ALTER TABLE auction_state REPLICA IDENTITY FULL;
+ALTER TABLE bids REPLICA IDENTITY FULL;
+ALTER TABLE sales REPLICA IDENTITY FULL;
+ALTER TABLE player_registrations REPLICA IDENTITY FULL;
+ALTER TABLE teams REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE auction_state; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bids; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE sales; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE player_registrations; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE teams; EXCEPTION WHEN duplicate_object THEN NULL; END;
+END $$;`;
+
+  const [copiedReplSQL, setCopiedReplSQL] = useState(false);
+
+  const handleCopyReplicationSQL = () => {
+    navigator.clipboard.writeText(replicationOnlySQL);
+    setCopiedReplSQL(true);
+    setTimeout(() => setCopiedReplSQL(false), 3000);
+  };
 
   const handleCopySchema = () => {
     navigator.clipboard.writeText(sampleSQL);
@@ -436,13 +471,23 @@ ALTER PUBLICATION supabase_realtime ADD TABLE sales;`;
             </p>
           </div>
 
-          <button
-            onClick={handleCopySchema}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors flex items-center space-x-1.5 shadow-sm"
-          >
-            {copiedSchema ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedSchema ? 'SQL Copied!' : 'Copy SQL Schema'}</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleCopyReplicationSQL}
+              className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 font-bold text-xs hover:bg-emerald-100 transition-colors flex items-center space-x-1.5 shadow-sm"
+              title="Copy the quick SQL to enable Realtime Replication on existing Supabase tables"
+            >
+              {copiedReplSQL ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Zap className="w-3.5 h-3.5 text-emerald-600" />}
+              <span>{copiedReplSQL ? 'Replication SQL Copied!' : 'Copy Realtime Fix SQL'}</span>
+            </button>
+            <button
+              onClick={handleCopySchema}
+              className="px-3.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-50 transition-colors flex items-center space-x-1.5 shadow-sm"
+            >
+              {copiedSchema ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedSchema ? 'SQL Copied!' : 'Copy Full Schema'}</span>
+            </button>
+          </div>
         </div>
 
         <div className="p-4 rounded-xl bg-midnight-900 text-slate-300 font-mono text-xs overflow-x-auto max-h-64 border border-slate-800">

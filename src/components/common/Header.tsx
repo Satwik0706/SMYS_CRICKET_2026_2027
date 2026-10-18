@@ -159,18 +159,28 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
             {/* Supabase status badge */}
             <div
               title={
-                isConfigured
-                  ? 'Supabase Cloud Connected'
+                store.isRealtimeConnected
+                  ? 'Realtime WebSocket Connected — Sub-50ms live synchronizing across all devices'
+                  : isConfigured
+                  ? 'Connecting to Supabase Realtime channel...'
                   : 'Local Realtime Broadcast Active'
               }
               className={`hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                isConfigured
-                  ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+                store.isRealtimeConnected
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                  : isConfigured
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
                   : 'bg-slate-500/10 text-slate-400 border-slate-500/30'
               }`}
             >
-              <Database className="w-3 h-3" />
-              <span>{isConfigured ? 'Supabase Sync' : 'Realtime Sync'}</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  store.isRealtimeConnected
+                    ? 'bg-emerald-400 animate-pulse'
+                    : 'bg-amber-400'
+                }`}
+              />
+              <span>{store.isRealtimeConnected ? '⚡ Realtime Live' : 'Connecting...'}</span>
             </div>
 
             {/* Audio Toggle */}
