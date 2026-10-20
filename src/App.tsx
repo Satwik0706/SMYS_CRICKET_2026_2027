@@ -6,6 +6,7 @@ import { PlayerRegistrationPortal } from './components/portal-register/PlayerReg
 import { AdminPortal } from './components/portal-admin/AdminPortal';
 import { PublicLiveAuction } from './components/portal-live/PublicLiveAuction';
 import { TeamPortal } from './components/portal-team/TeamPortal';
+import { PlayerPortal } from './components/portal-player/PlayerPortal';
 import { Trophy, Lock, ShieldCheck } from 'lucide-react';
 import { useTournamentStore } from './hooks/useTournamentStore';
 
@@ -21,6 +22,7 @@ export function App() {
     if (path.includes('/team')) {
       return store.getActiveTeam() ? 'team' : 'gateway';
     }
+    if (path.includes('/player')) return 'player';
     if (path.includes('/live')) return 'live';
     return 'gateway';
   };
@@ -84,7 +86,10 @@ export function App() {
           <PortalGateway onNavigate={handleSelectPortal} />
         )}
         {currentPortal === 'register' && (
-          <PlayerRegistrationPortal onGoToLive={() => handleSelectPortal('gateway')} />
+          <PlayerRegistrationPortal
+            onGoToLive={() => handleSelectPortal('gateway')}
+            onGoToPlayerDesk={() => handleSelectPortal('player')}
+          />
         )}
         {currentPortal === 'admin' && (
           <AdminPortal onLogout={() => handleSelectPortal('gateway')} />
@@ -92,6 +97,12 @@ export function App() {
         {currentPortal === 'live' && <PublicLiveAuction />}
         {currentPortal === 'team' && (
           <TeamPortal onLogout={() => handleSelectPortal('gateway')} />
+        )}
+        {currentPortal === 'player' && (
+          <PlayerPortal
+            onLogout={() => handleSelectPortal('gateway')}
+            onGoToRegister={() => handleSelectPortal('register')}
+          />
         )}
       </main>
 

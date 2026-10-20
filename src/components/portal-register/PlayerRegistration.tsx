@@ -45,9 +45,13 @@ const BOWLING_STYLES: BowlingStyle[] = [
 
 interface PlayerRegistrationPortalProps {
   onGoToLive: () => void;
+  onGoToPlayerDesk?: () => void;
 }
 
-export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> = ({ onGoToLive }) => {
+export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> = ({
+  onGoToLive,
+  onGoToPlayerDesk,
+}) => {
   const store = useTournamentStore();
 
   // Form states - ALL start empty with NO default prefilled values
@@ -316,14 +320,48 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
                 <span>View Public Live Auction</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {onGoToPlayerDesk && (
+                <button
+                  onClick={() => {
+                    if (submittedPlayer?.phone) {
+                      store.loginPlayer(submittedPlayer.phone);
+                    }
+                    onGoToPlayerDesk();
+                  }}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow-md transition-colors flex items-center justify-center space-x-2"
+                >
+                  <User className="w-4 h-4" />
+                  <span>Open Player Desk & Status</span>
+                </button>
+              )}
             </div>
           </div>
         ) : (
           /* Registration Form with White Creamy Luxury Styling */
-          <form
-            onSubmit={handleSubmit}
-            className="bg-white rounded-3xl shadow-[0_12px_45px_-8px_rgba(40,30,15,0.08)] border border-[#E6DFD1] overflow-hidden divide-y divide-[#F0EBE1]"
-          >
+          <div className="space-y-4">
+            {onGoToPlayerDesk && (
+              <div className="p-3.5 rounded-2xl bg-cyan-50/90 border border-cyan-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-sm">
+                <div className="flex items-center space-x-2.5 text-cyan-950">
+                  <User className="w-4 h-4 text-cyan-700 shrink-0" />
+                  <span>
+                    <strong>Already registered?</strong> Check your verification status, edit cricket ratings, or re-submit for recheck.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onGoToPlayerDesk}
+                  className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs whitespace-nowrap shadow-sm transition-colors"
+                >
+                  Player Desk & Status →
+                </button>
+              </div>
+            )}
+
+            <form
+              onSubmit={handleSubmit}
+              className="bg-white rounded-3xl shadow-[0_12px_45px_-8px_rgba(40,30,15,0.08)] border border-[#E6DFD1] overflow-hidden divide-y divide-[#F0EBE1]"
+            >
             {/* 1. Profile Photograph (Clean User Upload - No Sample Avatars) */}
             <div className="p-6 sm:p-8">
               <div className="flex items-center space-x-2 mb-4">
@@ -853,8 +891,9 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
               </button>
             </div>
           </form>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
     </div>
   );
 };

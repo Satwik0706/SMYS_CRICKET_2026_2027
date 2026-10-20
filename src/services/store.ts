@@ -39,6 +39,7 @@ const STORAGE_KEY_LOGS = 'smys_audit_logs_v2';
 const STORAGE_KEY_TEAM_AUTH = 'smys_active_team_auth_v2';
 const STORAGE_KEY_ADMIN_CREDS = 'smys_admin_credentials_v2';
 const STORAGE_KEY_ADMIN_AUTH = 'smys_admin_auth_v2';
+const STORAGE_KEY_PLAYER_AUTH = 'smys_active_player_auth_v2';
 
 function safeSync(operation: PromiseLike<unknown> | Promise<unknown>) {
   try {
@@ -80,6 +81,7 @@ export class TournamentStore {
   public adminId: string = 'admin';
   public adminPasswordHash: string = 'admin123';
   public isAdminAuth: boolean = false;
+  public activePlayerId: string | null = null;
 
   private constructor() {
     this.loadFromStorage();
@@ -103,6 +105,10 @@ export class TournamentStore {
       const savedAdminAuth = localStorage.getItem(STORAGE_KEY_ADMIN_AUTH);
       if (savedAdminAuth === 'true') {
         this.isAdminAuth = true;
+      }
+      const savedPlayer = localStorage.getItem(STORAGE_KEY_PLAYER_AUTH);
+      if (savedPlayer) {
+        this.activePlayerId = savedPlayer;
       }
 
       // Re-sync whenever user focuses or returns to tab
@@ -1239,6 +1245,127 @@ export class TournamentStore {
 
   public isAdminAuthenticated(): boolean {
     return this.isAdminAuth;
+  }
+
+  // --- Player Self-Service Authentication & Session ---
+
+  public loginPlayer(query: string): { success: boolean; message: string; player?: PlayerRegistration } {
+    const clean = query.trim();
+    if (!clean) {
+      return { success: false, message: 'Please enter your mobile phone number or Registration ID.' };
+    }
+
+    const queryDigits = clean.replace(/\D/g, '');
+    const cleanLower = clean.toLowerCase();
+
+    const player = this.players.find((p) => {
+      if (p.regNumber.toLowerCase() === cleanLower) return true;
+      if (p.id.toLowerCase() === cleanLower) return true;
+      const pDigits = p.phone.replace(/\D/g, '');
+      if (queryDigits.length >= 6) {
+        if (pDigits === queryDigits) return true;
+        if (pDigits.endsWith(queryDigits) || queryDigits.endsWith(pDigits)) return true;
+        if (queryDigits.length === 10 && pDigits.slice(-10) === queryDigits) return true;
+      }
+      return false;
+    });
+
+    if (!player) {
+      return {
+        success: false,
+        message: 'No registration found matching that mobile number or registration ID. Please check your details or register first.',
+      };
+    }
+
+    this.activePlayerId = player.id;
+    localStorage.setItem(STORAGE_KEY_PLAYER_AUTH, player.id);
+    this.addAuditLog('Player Portal Login', player.fullName, `Player ${player.regNumber} logged into Player Desk`);
+    this.notify();
+    return { success: true, message: `Welcome back, ${player.fullName}!`, player };
+  }
+
+  public logoutPlayer(): void {
+    this.activePlayerId = null;
+    localStorage.removeItem(STORAGE_KEY_PLAYER_AUTH);
+    this.notify();
+  }
+
+  public getActivePlayer(): PlayerRegistration | null {
+    if (!this.activePlayerId) return null;
+    return this.players.find((p) => p.id === this.activePlayerId) || null;
+  }
+
+  public async updatePlayerSelf(
+    playerId: string,
+    updates: Partial<PlayerRegistration>,
+    submitForRecheck: boolean = true
+  ): Promise<{ success: boolean; message: string; player?: PlayerRegistration }> {
+    const playerIndex = this.players.findIndex((p) => p.id === playerId);
+    if (playerIndex === -1) {
+      return { success: false, message: 'Player record not found.' };
+    }
+
+    const current = this.players[playerIndex];
+
+    const updatedPlayer: PlayerRegistration = {
+      ...current,
+      ...updates,
+      status: submitForRecheck ? 'pending' : current.status,
+      verificationNotes: submitForRecheck
+        ? (current.status === 'rejected'
+            ? `Re-submitted for review by player on ${new Date().toLocaleDateString()}`
+            : current.verificationNotes)
+        : current.verificationNotes,
+    };
+
+    this.players[playerIndex] = updatedPlayer;
+    this.addAuditLog(
+      'Player Updated Profile',
+      updatedPlayer.fullName,
+      `Player ${updatedPlayer.regNumber} updated details${submitForRecheck ? ' and submitted for recheck' : ''}`
+    );
+    this.saveToStorage();
+    this.broadcastRealtime('PLAYER_UPDATED', updatedPlayer);
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+
+    const client = getSupabase();
+    if (client) {
+      try {
+        const { error } = await client
+          .from('player_registrations')
+          .update({
+            full_name: updatedPlayer.fullName,
+            academic_year: updatedPlayer.academicYear,
+            phone: updatedPlayer.phone,
+            matches_played: updatedPlayer.matchesPlayed,
+            runs_scored: updatedPlayer.runsScored,
+            wickets_taken: updatedPlayer.wicketsTaken,
+            playing_role: updatedPlayer.playingRole,
+            batting_rating: updatedPlayer.battingRating,
+            bowling_rating: updatedPlayer.bowlingRating,
+            wicketkeeping_rating: updatedPlayer.wicketkeepingRating,
+            batting_style: updatedPlayer.battingStyle,
+            bowling_style: updatedPlayer.bowlingStyle,
+            photo_url: updatedPlayer.photoUrl,
+            status: updatedPlayer.status,
+            verification_notes: updatedPlayer.verificationNotes || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', playerId);
+
+        if (error) {
+          console.warn('Supabase player update notice:', error);
+        }
+      } catch (e) {
+        console.warn('Safe sync notice updating player:', e);
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Profile updated and submitted for recheck successfully!',
+      player: updatedPlayer,
+    };
   }
 
   // --- Player Assignment & Squad Balancing ---

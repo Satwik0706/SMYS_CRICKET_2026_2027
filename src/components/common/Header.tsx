@@ -13,6 +13,7 @@ import {
   LogOut,
   Lock,
   Home,
+  User,
 } from 'lucide-react';
 import { AppPortal } from '../../types';
 import { sound } from '../../services/soundEffects';
@@ -44,6 +45,8 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
       store.logoutAdmin();
     } else if (currentPortal === 'team') {
       store.logoutTeam();
+    } else if (currentPortal === 'player') {
+      store.logoutPlayer();
     }
     onSelectPortal('gateway');
   };
@@ -85,6 +88,13 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
           <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold">
             <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
             <span>Player Registration Portal</span>
+          </div>
+        );
+      case 'player':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-bold">
+            <User className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Player Self-Service Desk</span>
           </div>
         );
       case 'gateway':
@@ -213,6 +223,8 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
                     ? 'Exit Admin'
                     : currentPortal === 'team'
                     ? 'Exit Team'
+                    : currentPortal === 'player'
+                    ? 'Exit Player Desk'
                     : 'Switch Portal'}
                 </span>
                 <span className="sm:hidden">Exit</span>

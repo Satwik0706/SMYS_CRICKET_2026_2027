@@ -14,6 +14,8 @@ import {
   Flame,
   CheckCircle2,
   Zap,
+  UserCheck,
+  Phone,
 } from 'lucide-react';
 import { AppPortal } from '../../types';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
@@ -22,7 +24,7 @@ interface PortalGatewayProps {
   onNavigate: (portal: AppPortal) => void;
 }
 
-type SelectedRole = '' | 'admin' | 'team' | 'live' | 'register';
+type SelectedRole = '' | 'admin' | 'team' | 'live' | 'register' | 'player';
 
 export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
   const store = useTournamentStore();
@@ -40,6 +42,10 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
   const [teamPassInput, setTeamPassInput] = useState('');
   const [showTeamPass, setShowTeamPass] = useState(true);
   const [teamError, setTeamError] = useState<string | null>(null);
+
+  // Player login states
+  const [playerPhoneInput, setPlayerPhoneInput] = useState('');
+  const [playerError, setPlayerError] = useState<string | null>(null);
 
   const isAuctionLive = store.auctionState.status === 'bidding';
   const verifiedPlayersCount = store.players.filter((p) => p.status === 'verified').length;
@@ -69,6 +75,17 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
 
   const handleSelectTeamFromList = (loginId: string) => {
     setTeamLoginIdInput(loginId);
+  };
+
+  const handlePlayerSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPlayerError(null);
+    const res = store.loginPlayer(playerPhoneInput);
+    if (res.success) {
+      onNavigate('player');
+    } else {
+      setPlayerError(res.message);
+    }
   };
 
   return (
@@ -144,8 +161,8 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
               </span>
             </div>
 
-            {/* Quick 4-Tab Switcher for High Speed UI */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {/* Quick 5-Tab Switcher for High Speed UI */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <button
                 type="button"
                 onClick={() => {
@@ -251,6 +268,34 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                 <div>
                   <div className={`text-xs font-bold ${selectedRole === 'register' ? 'text-emerald-900' : 'text-slate-800'}`}>Hostel Player</div>
                   <div className="text-[10px] text-slate-500">Registration</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRole('player');
+                  setAdminError(null);
+                  setTeamError(null);
+                  setPlayerError(null);
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between ${
+                  selectedRole === 'player'
+                    ? 'bg-cyan-50 border-cyan-600 text-cyan-900 shadow-sm ring-2 ring-cyan-500/30'
+                    : 'bg-[#FAF7F2] border-[#E8E1D3] text-slate-600 hover:bg-white hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className={`p-1.5 rounded-lg ${selectedRole === 'player' ? 'bg-cyan-600 text-white' : 'bg-slate-200/60 text-slate-500'}`}>
+                    <UserCheck className="w-4 h-4" />
+                  </div>
+                  {selectedRole === 'player' && (
+                    <span className="w-2 h-2 rounded-full bg-cyan-600 animate-pulse" />
+                  )}
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${selectedRole === 'player' ? 'text-cyan-900' : 'text-slate-800'}`}>Player Desk</div>
+                  <div className="text-[10px] text-slate-500">Status & Edit</div>
                 </div>
               </button>
             </div>
@@ -598,6 +643,113 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                 <span>Enter Player Registration Portal</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+            </div>
+          )}
+
+          {/* 5. PLAYER SELF-SERVICE DESK SELECTED */}
+          {selectedRole === 'player' && (
+            <div className="bg-[#FCFAF6] rounded-2xl border border-[#E6DFD1] p-6 space-y-5 animate-fadeIn shadow-sm">
+              <div className="flex items-center space-x-3 pb-3 border-b border-[#E8E2D6]">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-700 flex items-center justify-center text-white shadow-md">
+                  <UserCheck className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Player Self-Service Desk</h3>
+                  <p className="text-xs text-slate-500">
+                    Log in using your registered mobile number to check verification status, edit ratings, or submit for recheck.
+                  </p>
+                </div>
+              </div>
+
+              {playerError && (
+                <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-bold flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{playerError}</span>
+                </div>
+              )}
+
+              {/* If player already has active session */}
+              {store.getActivePlayer() ? (
+                <div className="p-4 bg-white rounded-2xl border border-cyan-200 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <img
+                        src={store.getActivePlayer()?.photoUrl}
+                        alt="Player"
+                        className="w-12 h-12 rounded-xl object-cover border"
+                      />
+                      <div>
+                        <span className="font-mono text-[10px] text-slate-400 font-bold block">
+                          {store.getActivePlayer()?.regNumber}
+                        </span>
+                        <h4 className="font-extrabold text-sm text-slate-900">
+                          {store.getActivePlayer()?.fullName}
+                        </h4>
+                        <span className="text-[11px] font-bold text-cyan-700">
+                          Status: {store.getActivePlayer()?.status.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => store.logoutPlayer()}
+                      className="text-xs text-slate-400 hover:text-slate-600 underline"
+                    >
+                      Switch Number
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => onNavigate('player')}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-xs uppercase tracking-wider shadow-md hover:brightness-105 transition-all flex items-center justify-center space-x-2"
+                  >
+                    <span>Continue to Player Desk</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handlePlayerSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Registered Mobile Phone Number or Registration ID
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={playerPhoneInput}
+                        onChange={(e) => setPlayerPhoneInput(e.target.value)}
+                        placeholder="e.g. 9876543210 or SMYS-2026-001"
+                        className="w-full pl-10 pr-4 py-2.5 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500 bg-white"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Enter the 10-digit phone number you provided during player registration.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                    <button
+                      type="submit"
+                      className="w-full sm:flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-xs uppercase tracking-wider shadow-md hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2"
+                    >
+                      <UserCheck className="w-4 h-4 text-white" />
+                      <span>Check Status & Edit Profile</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('register')}
+                      className="w-full sm:w-auto px-4 py-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors"
+                    >
+                      New Registration
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
         </div>
