@@ -141,4 +141,4 @@ export interface AuditLog {
   timestamp: string;
 }
 
-export type AppPortal = 'gateway' | 'register' | 'admin' | 'live' | 'team' | 'player';
+export type AppPortal = 'gateway' | 'register' | 'admin' | 'live' | 'team' | 'player' | 'correction';

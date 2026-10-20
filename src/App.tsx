@@ -22,7 +22,7 @@ export function App() {
     if (path.includes('/team')) {
       return store.getActiveTeam() ? 'team' : 'gateway';
     }
-    if (path.includes('/player')) return 'player';
+    if (path.includes('/correction') || path.includes('/player')) return 'correction';
     if (path.includes('/live')) return 'live';
     return 'gateway';
   };
@@ -74,6 +74,7 @@ export function App() {
   }, [currentPortal]);
 
   const isDarkPortal = currentPortal === 'live';
+  const isPublicPortal = currentPortal === 'register' || currentPortal === 'correction' || currentPortal === 'player';
 
   return (
     <div className={`min-h-screen flex flex-col ${isDarkPortal ? 'bg-[#070D22]' : 'bg-[#FAF8F5]'}`}>
@@ -87,8 +88,8 @@ export function App() {
         )}
         {currentPortal === 'register' && (
           <PlayerRegistrationPortal
-            onGoToLive={() => handleSelectPortal('gateway')}
-            onGoToPlayerDesk={() => handleSelectPortal('player')}
+            onGoToLive={() => window.open('/live', '_blank')}
+            onGoToPlayerDesk={() => window.open('/correction', '_blank')}
           />
         )}
         {currentPortal === 'admin' && (
@@ -98,10 +99,10 @@ export function App() {
         {currentPortal === 'team' && (
           <TeamPortal onLogout={() => handleSelectPortal('gateway')} />
         )}
-        {currentPortal === 'player' && (
+        {(currentPortal === 'correction' || currentPortal === 'player') && (
           <PlayerPortal
-            onLogout={() => handleSelectPortal('gateway')}
-            onGoToRegister={() => handleSelectPortal('register')}
+            onLogout={() => store.logoutPlayer()}
+            onGoToRegister={() => window.open('/register', '_blank')}
           />
         )}
       </main>
@@ -127,27 +128,29 @@ export function App() {
             </div>
           </div>
 
-          {/* Secure Navigation & Isolation Status */}
-          <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
-            <button
-              onClick={() => handleSelectPortal('gateway')}
-              className={`transition-colors flex items-center space-x-1.5 ${
-                isDarkPortal ? 'hover:text-electric text-slate-300' : 'hover:text-amber-700 text-slate-700'
-              }`}
-            >
-              <Lock className="w-3.5 h-3.5 text-amber-500" />
-              <span>Role Selection Gateway</span>
-            </button>
-            <span>•</span>
-            <span className={isDarkPortal ? 'text-slate-400' : 'text-slate-500'}>
-              Active Portal: <strong className="text-amber-600 uppercase font-mono">{currentPortal}</strong>
-            </span>
-            <span>•</span>
-            <span className="text-emerald-600 flex items-center space-x-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Restricted Session Active</span>
-            </span>
-          </div>
+          {/* Secure Navigation & Isolation Status - Strictly hidden on public student pages */}
+          {!isPublicPortal && (
+            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
+              <button
+                onClick={() => handleSelectPortal('gateway')}
+                className={`transition-colors flex items-center space-x-1.5 ${
+                  isDarkPortal ? 'hover:text-electric text-slate-300' : 'hover:text-amber-700 text-slate-700'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-500" />
+                <span>Role Selection Gateway</span>
+              </button>
+              <span>•</span>
+              <span className={isDarkPortal ? 'text-slate-400' : 'text-slate-500'}>
+                Active Portal: <strong className="text-amber-600 uppercase font-mono">{currentPortal}</strong>
+              </span>
+              <span>•</span>
+              <span className="text-emerald-600 flex items-center space-x-1">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Restricted Session Active</span>
+              </span>
+            </div>
+          )}
 
           <p className={`text-[11px] ${isDarkPortal ? 'text-slate-500' : 'text-slate-500'}`}>
             © 2026 SMYS Cricket Ecosystem • All Rights Reserved

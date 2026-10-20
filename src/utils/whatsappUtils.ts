@@ -75,7 +75,9 @@ export const buildWhatsAppMessage = (options: WhatsAppNoticeOptions): string => 
       `📋 *Details / Admin Note:*\n` +
       `"${reason.trim()}"\n\n` +
       `👉 *Next Steps:*\n` +
-      `Please reply to this message with the requested correction or updated details (e.g., clearer photo, updated stats, or contact info) so our committee can verify and approve you for the auction pool.\n\n` +
+      `You can check your status, edit your ratings and player info, and submit for recheck directly on our Player Correction Portal:\n` +
+      `🔗 https://smys-cricket-2026-2027.vercel.app/correction\n\n` +
+      `Alternatively, reply to this message with your updated details.\n\n` +
       `Best regards,\n` +
       `*Chief Administrator & Auction Committee*`
     );
@@ -90,7 +92,10 @@ export const buildWhatsAppMessage = (options: WhatsAppNoticeOptions): string => 
     `❌ *STATUS: REGISTRATION REJECTED*\n\n` +
     `📋 *Reason / Details:*\n` +
     `"${reason.trim()}"\n\n` +
-    `If you believe this decision was made in error or wish to request an administrative review, please reply to this number or meet the committee desk.\n\n` +
+    `👉 *Review & Re-submit:*\n` +
+    `You can review your status and update your registration details on the Player Correction Portal:\n` +
+    `🔗 https://smys-cricket-2026-2027.vercel.app/correction\n\n` +
+    `If you believe this decision was made in error, please reply to this number or meet the committee desk.\n\n` +
     `Best regards,\n` +
     `*Chief Administrator & Auction Committee*`
   );

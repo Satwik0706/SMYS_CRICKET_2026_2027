@@ -332,15 +332,11 @@ export const PlayerPortal: React.FC<PlayerPortalProps> = ({
                 onClick={onGoToRegister}
                 className="text-cyan-700 hover:text-cyan-800 font-bold hover:underline"
               >
-                Haven't registered yet? Register for SMYS 2026 →
+                Haven't registered yet? Register for SMYS 2026 (New Window) →
               </button>
-              <button
-                type="button"
-                onClick={onLogout}
-                className="text-slate-400 hover:text-slate-600 text-[11px]"
-              >
-                ← Back to Common Role Gateway
-              </button>
+              <p className="text-[11px] text-slate-400">
+                Official SMYS 2026 Correction Desk • 75th Sathpantha
+              </p>
             </div>
           </div>
         </div>

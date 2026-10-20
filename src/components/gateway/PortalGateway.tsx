@@ -82,7 +82,7 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
     setPlayerError(null);
     const res = store.loginPlayer(playerPhoneInput);
     if (res.success) {
-      onNavigate('player');
+      window.open('/correction', '_blank');
     } else {
       setPlayerError(res.message);
     }
@@ -636,11 +636,11 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
               </div>
 
               <button
-                onClick={() => onNavigate('register')}
+                onClick={() => window.open('/register', '_blank')}
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/20 hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2"
               >
                 <UserPlus className="w-4 h-4 text-white" />
-                <span>Enter Player Registration Portal</span>
+                <span>Open Registration Portal (New Window)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -654,9 +654,9 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                   <UserCheck className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Player Self-Service Desk</h3>
+                  <h3 className="text-base font-bold text-slate-900">Player Correction & Status Desk</h3>
                   <p className="text-xs text-slate-500">
-                    Log in using your registered mobile number to check verification status, edit ratings, or submit for recheck.
+                    Log in using your registered mobile number to check verification status, edit ratings, or submit for recheck. Opens in a separate standalone window.
                   </p>
                 </div>
               </div>
@@ -701,10 +701,10 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                   </div>
 
                   <button
-                    onClick={() => onNavigate('player')}
+                    onClick={() => window.open('/correction', '_blank')}
                     className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-xs uppercase tracking-wider shadow-md hover:brightness-105 transition-all flex items-center justify-center space-x-2"
                   >
-                    <span>Continue to Player Desk</span>
+                    <span>Open Player Correction Desk (New Window)</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -736,16 +736,16 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                       className="w-full sm:flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-xs uppercase tracking-wider shadow-md hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2"
                     >
                       <UserCheck className="w-4 h-4 text-white" />
-                      <span>Check Status & Edit Profile</span>
+                      <span>Check Status & Edit Profile (New Window)</span>
                       <ArrowRight className="w-4 h-4" />
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => onNavigate('register')}
+                      onClick={() => window.open('/register', '_blank')}
                       className="w-full sm:w-auto px-4 py-3 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors"
                     >
-                      New Registration
+                      New Registration ↗
                     </button>
                   </div>
                 </form>

@@ -317,7 +317,7 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
                 onClick={onGoToLive}
                 className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white font-bold text-sm hover:brightness-105 shadow-md shadow-amber-500/20 transition-all flex items-center justify-center space-x-2"
               >
-                <span>View Public Live Auction</span>
+                <span>View Public Live Auction (New Window)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 
@@ -332,7 +332,7 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-sm shadow-md transition-colors flex items-center justify-center space-x-2"
                 >
                   <User className="w-4 h-4" />
-                  <span>Open Player Desk & Status</span>
+                  <span>Open Correction Desk (New Window) ↗</span>
                 </button>
               )}
             </div>
@@ -345,7 +345,7 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
                 <div className="flex items-center space-x-2.5 text-cyan-950">
                   <User className="w-4 h-4 text-cyan-700 shrink-0" />
                   <span>
-                    <strong>Already registered?</strong> Check your verification status, edit cricket ratings, or re-submit for recheck.
+                    <strong>Already registered?</strong> Check your verification status, edit cricket ratings, or submit for recheck.
                   </span>
                 </div>
                 <button
@@ -353,7 +353,7 @@ export const PlayerRegistrationPortal: React.FC<PlayerRegistrationPortalProps> =
                   onClick={onGoToPlayerDesk}
                   className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs whitespace-nowrap shadow-sm transition-colors"
                 >
-                  Player Desk & Status →
+                  Correction & Status Desk ↗
                 </button>
               </div>
             )}

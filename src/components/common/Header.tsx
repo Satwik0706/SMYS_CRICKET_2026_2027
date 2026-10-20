@@ -45,11 +45,15 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
       store.logoutAdmin();
     } else if (currentPortal === 'team') {
       store.logoutTeam();
-    } else if (currentPortal === 'player') {
+    } else if (currentPortal === 'player' || currentPortal === 'correction') {
       store.logoutPlayer();
+      return;
     }
     onSelectPortal('gateway');
   };
+
+  const isPublicStandalone =
+    currentPortal === 'register' || currentPortal === 'correction' || currentPortal === 'player';
 
   const renderPortalBadge = () => {
     switch (currentPortal) {
@@ -90,11 +94,12 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
             <span>Player Registration Portal</span>
           </div>
         );
+      case 'correction':
       case 'player':
         return (
           <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-bold">
             <User className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Player Self-Service Desk</span>
+            <span>Player Correction Desk</span>
           </div>
         );
       case 'gateway':
@@ -124,10 +129,11 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo & Title */}
           <div
-            className="flex items-center space-x-3 cursor-pointer group"
+            className={`flex items-center space-x-3 group ${
+              isPublicStandalone || currentPortal === 'gateway' ? 'cursor-default' : 'cursor-pointer'
+            }`}
             onClick={() => {
-              // If not in a portal, go to gateway
-              if (currentPortal === 'gateway') return;
+              if (isPublicStandalone || currentPortal === 'gateway') return;
               if (confirm('Do you want to exit this portal and return to the Common Role Gateway?')) {
                 handleExitPortal();
               }
@@ -210,8 +216,8 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
               )}
             </button>
 
-            {/* Exit Portal / Switch Role Button (Only shown when inside a portal) */}
-            {currentPortal !== 'gateway' ? (
+            {/* Exit Portal / Switch Role Button */}
+            {currentPortal === 'admin' || currentPortal === 'team' ? (
               <button
                 onClick={handleExitPortal}
                 title="Exit this portal and return to the Common Role Gateway"
@@ -219,18 +225,34 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">
-                  {currentPortal === 'admin'
-                    ? 'Exit Admin'
-                    : currentPortal === 'team'
-                    ? 'Exit Team'
-                    : currentPortal === 'player'
-                    ? 'Exit Player Desk'
-                    : 'Switch Portal'}
+                  {currentPortal === 'admin' ? 'Exit Admin' : 'Exit Team'}
                 </span>
                 <span className="sm:hidden">Exit</span>
               </button>
+            ) : currentPortal === 'live' ? (
+              <button
+                onClick={() => onSelectPortal('gateway')}
+                title="Return to Common Role Gateway"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition-all shadow-sm active:scale-95"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Exit Stream</span>
+                <span className="sm:hidden">Exit</span>
+              </button>
+            ) : (currentPortal === 'correction' || currentPortal === 'player') && store.getActivePlayer() ? (
+              <button
+                onClick={() => {
+                  store.logoutPlayer();
+                }}
+                title="Sign out of your player session"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 border border-slate-300 text-xs font-bold transition-all shadow-sm active:scale-95"
+              >
+                <LogOut className="w-3.5 h-3.5 text-slate-600" />
+                <span className="hidden sm:inline">Sign Out</span>
+                <span className="sm:hidden">Exit</span>
+              </button>
             ) : (
-              <div className="hidden sm:flex items-center space-x-1 text-[11px] text-slate-400 font-semibold px-2 py-1 rounded-lg bg-white/5 border border-white/10">
+              <div className="hidden sm:flex items-center space-x-1 text-[11px] text-slate-400 font-semibold px-2 py-1 rounded-lg bg-black/5 border border-black/10">
                 <Lock className="w-3 h-3 text-gold" />
                 <span>Restricted Access</span>
               </div>
@@ -247,7 +269,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
         </div>
       </div>
 
-      {/* Mobile Drawer Menu (Strictly shows current portal info + exit to gateway) */}
+      {/* Mobile Drawer Menu (Strictly shows current portal info) */}
       {mobileMenuOpen && (
         <div
           className={`md:hidden px-4 pt-3 pb-4 space-y-3 border-t ${
@@ -259,7 +281,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
             {renderPortalBadge()}
           </div>
 
-          {currentPortal !== 'gateway' ? (
+          {currentPortal === 'admin' || currentPortal === 'team' || currentPortal === 'live' ? (
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
@@ -270,9 +292,20 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
               <LogOut className="w-4 h-4" />
               <span>Exit Portal & Return to Role Gateway</span>
             </button>
+          ) : (currentPortal === 'correction' || currentPortal === 'player') && store.getActivePlayer() ? (
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                store.logoutPlayer();
+              }}
+              className="w-full flex items-center justify-center space-x-2 py-2.5 px-3 rounded-xl bg-slate-200 text-slate-800 border border-slate-300 text-xs font-bold shadow"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sign Out of Player Session</span>
+            </button>
           ) : (
             <p className="text-xs text-slate-400 text-center py-2">
-              Select your role from the dropdown on the main page to navigate.
+              Official SMYS 2026 Portal • Intra Hostel Cricket
             </p>
           )}
         </div>
