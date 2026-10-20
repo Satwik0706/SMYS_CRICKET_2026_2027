@@ -371,6 +371,7 @@ export class TournamentStore {
                 verifiedBy: (row.verified_by as string) || undefined,
                 verifiedAt: (row.verified_at as string) || undefined,
                 assignedTeamId: (row.assigned_team_id as string) || undefined,
+                tierId: (row.tier_id as string) || undefined,
                 createdAt: (row.created_at as string) || new Date().toLocaleString(),
               });
               this.saveToStorage(false);
@@ -382,6 +383,10 @@ export class TournamentStore {
               this.players[idx] = {
                 ...this.players[idx],
                 status: (row.status as PlayerRegistration['status']) || this.players[idx].status,
+                battingRating: row.batting_rating !== undefined ? (row.batting_rating !== null ? Number(row.batting_rating) : null) : this.players[idx].battingRating,
+                bowlingRating: row.bowling_rating !== undefined ? (row.bowling_rating !== null ? Number(row.bowling_rating) : null) : this.players[idx].bowlingRating,
+                wicketkeepingRating: row.wicketkeeping_rating !== undefined ? (row.wicketkeeping_rating !== null ? Number(row.wicketkeeping_rating) : null) : this.players[idx].wicketkeepingRating,
+                tierId: row.tier_id !== undefined ? ((row.tier_id as string) || null) : this.players[idx].tierId,
                 verificationNotes: (row.verification_notes as string) || this.players[idx].verificationNotes,
                 verifiedBy: (row.verified_by as string) || this.players[idx].verifiedBy,
                 verifiedAt: (row.verified_at as string) || this.players[idx].verifiedAt,
@@ -816,6 +821,57 @@ export class TournamentStore {
     }
   }
 
+  public updatePlayerRatingsAndTier(
+    playerId: string,
+    updates: {
+      battingRating?: number | null;
+      bowlingRating?: number | null;
+      wicketkeepingRating?: number | null;
+      tierId?: string | null;
+      notes?: string;
+    },
+    adminName: string = 'Chief Administrator'
+  ) {
+    const player = this.players.find((p) => p.id === playerId);
+    if (!player) return;
+
+    if (updates.battingRating !== undefined) player.battingRating = updates.battingRating;
+    if (updates.bowlingRating !== undefined) player.bowlingRating = updates.bowlingRating;
+    if (updates.wicketkeepingRating !== undefined) player.wicketkeepingRating = updates.wicketkeepingRating;
+    if (updates.tierId !== undefined) player.tierId = updates.tierId;
+    if (updates.notes !== undefined) player.verificationNotes = updates.notes;
+
+    player.verifiedBy = adminName;
+    player.verifiedAt = new Date().toLocaleString();
+
+    this.addAuditLog(
+      'Player Ratings/Tier Updated',
+      adminName,
+      `Updated ${player.fullName} (${player.regNumber}): Bat ${player.battingRating ?? 'NA'}, Bowl ${player.bowlingRating ?? 'NA'}, Keep ${player.wicketkeepingRating ?? 'NA'}, Tier: ${player.tierId || 'Auto'}`
+    );
+    this.saveToStorage();
+    this.broadcastRealtime('PLAYER_UPDATED', player);
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+
+    const client = getSupabase();
+    if (client) {
+      safeSync(
+        client
+          .from('player_registrations')
+          .update({
+            batting_rating: player.battingRating,
+            bowling_rating: player.bowlingRating,
+            wicketkeeping_rating: player.wicketkeepingRating,
+            tier_id: player.tierId || null,
+            verification_notes: player.verificationNotes || null,
+            verified_by: adminName,
+            verified_at: new Date().toISOString(),
+          })
+          .eq('id', playerId)
+      );
+    }
+  }
+
   public deletePlayer(playerId: string): { success: boolean; message: string } {
     const playerIndex = this.players.findIndex((p) => p.id === playerId);
     if (playerIndex === -1) {
@@ -894,6 +950,7 @@ export class TournamentStore {
             status: newPlayer.status,
             verification_notes: newPlayer.verificationNotes || null,
             verified_by: newPlayer.verifiedBy || null,
+            tier_id: newPlayer.tierId || null,
           });
 
           if (error) {
@@ -1271,6 +1328,11 @@ export class TournamentStore {
   // --- Live Auction Command Actions ---
 
   public getPlayerTier(player: PlayerRegistration): AuctionTier {
+    if (player.tierId) {
+      const explicit = this.tiers.find((tier) => tier.id === player.tierId);
+      if (explicit) return explicit;
+    }
+
     const maxRating = Math.max(
       player.battingRating || 0,
       player.bowlingRating || 0,

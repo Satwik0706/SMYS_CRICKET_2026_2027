@@ -1,28 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import {
   Search,
-  Filter,
   CheckCircle,
   XCircle,
   AlertTriangle,
   UserCheck,
   Eye,
   CheckCheck,
-  Shield,
   Phone,
-  GraduationCap,
-  Sparkles,
   Plus,
   Trash2,
   UserPlus,
   Upload,
   RefreshCw,
-  DownloadCloud,
+  Sliders,
+  Edit3,
+  MessageSquare,
+  Send,
+  Copy,
+  ExternalLink,
+  Smartphone,
+  Monitor,
+  Check,
+  Star,
+  Award,
+  Zap,
 } from 'lucide-react';
 import { BattingStyle, BowlingStyle, PlayerRegistration, PlayingRole, RegistrationStatus } from '../../types';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
 import { compressAndResizeImage } from '../../utils/imageUtils';
 import { getSupabaseCredentials, uploadPlayerPhotoToSupabase } from '../../services/supabaseClient';
+import {
+  formatWhatsAppPhoneNumber,
+  isMobileDevice,
+  buildWhatsAppMessage,
+  openWhatsAppNotice,
+  getWhatsAppUrl,
+} from '../../utils/whatsappUtils';
 
 export const PlayerVerification: React.FC = () => {
   const store = useTournamentStore();
@@ -31,9 +45,45 @@ export const PlayerVerification: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<RegistrationStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerRegistration | null>(null);
-  const [rejectModalPlayer, setRejectModalPlayer] = useState<PlayerRegistration | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
   const [deletingPlayer, setDeletingPlayer] = useState<PlayerRegistration | null>(null);
+
+  // --- Ratings & Tier Editing Modal State ---
+  const [editingRatingsPlayer, setEditingRatingsPlayer] = useState<PlayerRegistration | null>(null);
+  const [editBattingRating, setEditBattingRating] = useState<number | null>(7);
+  const [editIsBattingNA, setEditIsBattingNA] = useState(false);
+  const [editBowlingRating, setEditBowlingRating] = useState<number | null>(6);
+  const [editIsBowlingNA, setEditIsBowlingNA] = useState(false);
+  const [editKeepingRating, setEditKeepingRating] = useState<number | null>(5);
+  const [editIsKeepingNA, setEditIsKeepingNA] = useState(false);
+  const [editTierId, setEditTierId] = useState<string>('auto'); // 'auto' or tier.id
+  const [editNotes, setEditNotes] = useState('');
+  const [isSavingRatings, setIsSavingRatings] = useState(false);
+  const [ratingsSaveSuccess, setRatingsSaveSuccess] = useState(false);
+
+  // --- WhatsApp Rejection & Suggest Correction Modal State ---
+  const [whatsappModalPlayer, setWhatsappModalPlayer] = useState<PlayerRegistration | null>(null);
+  const [noticeType, setNoticeType] = useState<'rejection' | 'correction'>('rejection');
+  const [noticeReason, setNoticeReason] = useState('');
+  const [noticePhone, setNoticePhone] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Common rejection & correction presets
+  const REJECTION_PRESETS = [
+    'Did not meet tournament eligibility criteria',
+    'Discrepancy in player statistics / unverified record',
+    'Missing required hostel room proof / student ID',
+    'Ineligible academic year / branch criteria',
+    'Duplicate registration entry detected',
+  ];
+
+  const CORRECTION_PRESETS = [
+    'Please upload a clear front-facing passport photograph',
+    'Please provide an active 10-digit WhatsApp phone number',
+    'Please verify matches played and run/wicket stats with committee',
+    'Please confirm your hostel branch and room allocation number',
+    'Please select the appropriate bowling / batting style',
+  ];
 
   // Auto-sync from Supabase on component mount and every 4 seconds for real-time registrations
   useEffect(() => {
@@ -65,6 +115,7 @@ export const PlayerVerification: React.FC = () => {
   const [newBatRating, setNewBatRating] = useState<number>(7);
   const [newBowlRating, setNewBowlRating] = useState<number>(6);
   const [newKeepRating, setNewKeepRating] = useState<number>(5);
+  const [newTierChoice, setNewTierChoice] = useState<string>('auto');
   const [newPhotoUrl, setNewPhotoUrl] = useState(
     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=500&q=80'
   );
@@ -119,32 +170,130 @@ export const PlayerVerification: React.FC = () => {
     store.verifyPlayer(player.id, 'verified', 'Approved for SMYS 2026 Auction Pool', 'Chief Administrator');
   };
 
-  const handleRejectConfirm = () => {
-    if (!rejectModalPlayer) return;
-    store.verifyPlayer(
-      rejectModalPlayer.id,
-      'rejected',
-      rejectReason.trim() || 'Did not meet tournament eligibility criteria',
-      'Chief Administrator'
+  // Open Edit Ratings & Tier Modal
+  const openEditRatingsModal = (player: PlayerRegistration) => {
+    setEditingRatingsPlayer(player);
+    setEditBattingRating(player.battingRating);
+    setEditIsBattingNA(player.battingRating === null);
+    setEditBowlingRating(player.bowlingRating);
+    setEditIsBowlingNA(player.bowlingRating === null);
+    setEditKeepingRating(player.wicketkeepingRating);
+    setEditIsKeepingNA(player.wicketkeepingRating === null);
+    setEditTierId(player.tierId || 'auto');
+    setEditNotes(player.verificationNotes || '');
+    setRatingsSaveSuccess(false);
+  };
+
+  const handleSaveRatingsAndTier = async () => {
+    if (!editingRatingsPlayer) return;
+    setIsSavingRatings(true);
+    try {
+      const batRating = editIsBattingNA ? null : editBattingRating;
+      const bowlRating = editIsBowlingNA ? null : editBowlingRating;
+      const keepRating = editIsKeepingNA ? null : editKeepingRating;
+      const tierId = editTierId === 'auto' ? null : editTierId;
+
+      store.updatePlayerRatingsAndTier(
+        editingRatingsPlayer.id,
+        {
+          battingRating: batRating,
+          bowlingRating: bowlRating,
+          wicketkeepingRating: keepRating,
+          tierId: tierId,
+          notes: editNotes.trim() || undefined,
+        },
+        'Chief Administrator'
+      );
+
+      setRatingsSaveSuccess(true);
+      setTimeout(() => {
+        setRatingsSaveSuccess(false);
+        setEditingRatingsPlayer(null);
+      }, 700);
+    } catch (err: any) {
+      alert('Error updating ratings: ' + (err.message || 'Please check connection'));
+    } finally {
+      setIsSavingRatings(false);
+    }
+  };
+
+  // Open WhatsApp Rejection or Suggest Correction Modal
+  const openWhatsAppModal = (player: PlayerRegistration, type: 'rejection' | 'correction') => {
+    setWhatsappModalPlayer(player);
+    setNoticeType(type);
+    setNoticePhone(player.phone || '');
+    setNoticeReason(
+      type === 'rejection'
+        ? 'Did not meet tournament eligibility criteria'
+        : 'Please upload a clear front-facing passport photograph'
     );
-    setRejectModalPlayer(null);
-    setRejectReason('');
+    setIsCopied(false);
+  };
+
+  // Send WhatsApp Notice + Update Database Status
+  const handleConfirmWhatsAppNotice = async (forceTarget?: 'web' | 'mobile') => {
+    if (!whatsappModalPlayer) return;
+    setIsUpdatingStatus(true);
+    try {
+      const cleanReason = noticeReason.trim() || 'No specific reason provided';
+
+      if (noticeType === 'rejection') {
+        store.verifyPlayer(
+          whatsappModalPlayer.id,
+          'rejected',
+          `Rejected: ${cleanReason}`,
+          'Chief Administrator'
+        );
+      } else {
+        // Suggest Correction -> keeps or sets to pending with correction notes
+        store.verifyPlayer(
+          whatsappModalPlayer.id,
+          'pending',
+          `Correction Requested: ${cleanReason}`,
+          'Chief Administrator'
+        );
+      }
+
+      // Generate WhatsApp message
+      const message = buildWhatsAppMessage({
+        fullName: whatsappModalPlayer.fullName,
+        regNumber: whatsappModalPlayer.regNumber,
+        type: noticeType,
+        reason: cleanReason,
+        tournamentTitle: store.config.title || 'SMYS INTRA HOSTEL CRICKET AUCTION 2026',
+      });
+
+      // Launch WhatsApp (Web on PC or App on mobile)
+      openWhatsAppNotice(noticePhone || whatsappModalPlayer.phone, message, forceTarget);
+
+      setWhatsappModalPlayer(null);
+      setNoticeReason('');
+    } catch (err: any) {
+      alert('Error processing notice: ' + (err.message || 'Failed'));
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  // Copy WhatsApp message to clipboard
+  const handleCopyMessage = () => {
+    if (!whatsappModalPlayer) return;
+    const message = buildWhatsAppMessage({
+      fullName: whatsappModalPlayer.fullName,
+      regNumber: whatsappModalPlayer.regNumber,
+      type: noticeType,
+      reason: noticeReason.trim() || 'No specific reason provided',
+      tournamentTitle: store.config.title || 'SMYS INTRA HOSTEL CRICKET AUCTION 2026',
+    });
+    navigator.clipboard.writeText(message);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2500);
   };
 
   const handleDeleteConfirm = () => {
     if (!deletingPlayer) return;
     store.deletePlayer(deletingPlayer.id);
     setDeletingPlayer(null);
-  };
-
-  const handleRequestCorrection = (player: PlayerRegistration) => {
-    const notes = prompt(
-      'Enter correction instructions for ' + player.fullName + ':',
-      'Please update phone number or provide clearer photo.'
-    );
-    if (notes) {
-      store.verifyPlayer(player.id, 'pending', `Correction Requested: ${notes}`, 'Chief Administrator');
-    }
   };
 
   const handleDirectAddPlayer = async (e: React.FormEvent) => {
@@ -170,6 +319,7 @@ export const PlayerVerification: React.FC = () => {
         status: 'verified', // Directly verified by administrator
         verifiedBy: 'Chief Administrator',
         verifiedAt: new Date().toLocaleString(),
+        tierId: newTierChoice === 'auto' ? null : newTierChoice,
       });
 
       setIsAddPlayerModalOpen(false);
@@ -179,12 +329,25 @@ export const PlayerVerification: React.FC = () => {
       setNewMatches('');
       setNewRuns('');
       setNewWickets('');
+      setNewTierChoice('auto');
     } catch (err: any) {
       alert('Error adding player: ' + (err.message || 'Please check your connection and try again.'));
     } finally {
       setIsAddingPlayer(false);
     }
   };
+
+  // Preview computed highest rating for the edit modal
+  const editMaxRating = Math.max(
+    editIsBattingNA ? 0 : editBattingRating || 0,
+    editIsBowlingNA ? 0 : editBowlingRating || 0,
+    editIsKeepingNA ? 0 : editKeepingRating || 0
+  );
+  const autoTierPreview =
+    store.tiers.find((t) => editMaxRating >= t.minRating && editMaxRating <= t.maxRating) ||
+    store.tiers[store.tiers.length - 1];
+
+  const currentDeviceIsMobile = isMobileDevice();
 
   return (
     <div className="space-y-6">
@@ -197,7 +360,7 @@ export const PlayerVerification: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-slate-900">Player Profile Review & Vetting</h2>
           <p className="text-xs text-slate-500">
-            Review incoming player registrations, approve or reject candidates, add players directly, or delete entries.
+            Review incoming player registrations, adjust ratings, assign custom auction tiers, or reject/suggest corrections with direct WhatsApp notification.
           </p>
         </div>
 
@@ -301,6 +464,7 @@ export const PlayerVerification: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredPlayers.map((player) => {
             const tier = store.getPlayerTier(player);
+            const isManualTier = Boolean(player.tierId);
 
             return (
               <div
@@ -327,14 +491,14 @@ export const PlayerVerification: React.FC = () => {
                           {player.playingRole}
                         </span>
                         <span className="text-[11px] text-slate-400 block font-medium">
-                          {player.academicYear}
+                          {player.academicYear} • {player.phone}
                         </span>
                       </div>
                     </div>
 
                     {/* Status Badge */}
                     <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 ${
                         player.status === 'verified'
                           ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
                           : player.status === 'rejected'
@@ -362,43 +526,67 @@ export const PlayerVerification: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Ratings Row */}
-                  <div className="space-y-1.5 text-xs">
+                  {/* Ratings Row with Edit button */}
+                  <div className="space-y-1.5 text-xs bg-slate-50/70 p-3 rounded-xl border border-slate-100">
+                    <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-1">
+                        <Star className="w-3 h-3 text-gold" />
+                        <span>Evaluation Ratings</span>
+                      </span>
+                      <button
+                        onClick={() => openEditRatingsModal(player)}
+                        className="text-[11px] font-bold text-electric hover:text-electric-hover flex items-center space-x-1 px-2 py-0.5 rounded bg-electric/10 hover:bg-electric/20 transition-colors"
+                        title="Edit ratings and tier"
+                      >
+                        <Sliders className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+
                     <div className="flex items-center justify-between text-slate-600">
-                      <span>🏏 Batting Rating:</span>
+                      <span>🏏 Batting:</span>
                       <span className="font-bold text-slate-900">
-                        {player.battingRating ? `${player.battingRating}/10` : 'NA'}
+                        {player.battingRating !== null ? `${player.battingRating}/10` : 'NA'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-600">
-                      <span>🎯 Bowling Rating:</span>
+                      <span>🎯 Bowling:</span>
                       <span className="font-bold text-slate-900">
-                        {player.bowlingRating ? `${player.bowlingRating}/10` : 'NA'}
+                        {player.bowlingRating !== null ? `${player.bowlingRating}/10` : 'NA'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-600">
-                      <span>🧤 Keeping Rating:</span>
+                      <span>🧤 Keeping:</span>
                       <span className="font-bold text-slate-900">
-                        {player.wicketkeepingRating ? `${player.wicketkeepingRating}/10` : 'NA'}
+                        {player.wicketkeepingRating !== null ? `${player.wicketkeepingRating}/10` : 'NA'}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-slate-100">
-                      <span className="text-[11px] text-slate-400">Auction Tier:</span>
-                      <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                        {tier.name}
+                    <div className="flex items-center justify-between text-slate-600 pt-1.5 border-t border-slate-200">
+                      <span className="text-[11px] text-slate-500 font-semibold flex items-center space-x-1">
+                        <Award className="w-3 h-3 text-amber-500" />
+                        <span>Auction Tier:</span>
                       </span>
+                      <div className="text-right">
+                        <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-flex items-center space-x-1">
+                          {isManualTier && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" title="Admin manual tier override" />}
+                          <span>{tier.name}</span>
+                        </span>
+                        <span className="block text-[9px] text-slate-400 mt-0.5">
+                          Base: ₹{tier.minBid.toLocaleString('en-IN')} {isManualTier ? '(Manual)' : '(Auto)'}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
                   {player.verificationNotes && (
-                    <div className="mt-3 p-2 bg-slate-50 rounded-lg text-[11px] text-slate-600 border border-slate-200">
+                    <div className="mt-2.5 p-2 bg-amber-50/60 rounded-lg text-[11px] text-slate-600 border border-amber-200">
                       <span className="font-bold text-slate-700">Audit Note:</span> {player.verificationNotes}
                     </div>
                   )}
                 </div>
 
                 {/* Card Actions Footer */}
-                <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="p-3 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center space-x-1">
                     <button
                       onClick={() => setSelectedPlayer(player)}
@@ -406,6 +594,13 @@ export const PlayerVerification: React.FC = () => {
                       title="View Full Profile"
                     >
                       <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => openEditRatingsModal(player)}
+                      className="p-1.5 rounded-lg text-electric hover:bg-blue-50 transition-colors"
+                      title="Edit Player Ratings & Set Tier"
+                    >
+                      <Sliders className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setDeletingPlayer(player)}
@@ -420,30 +615,31 @@ export const PlayerVerification: React.FC = () => {
                     {player.status !== 'verified' && (
                       <button
                         onClick={() => handleApprove(player)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center space-x-1"
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center space-x-1 shadow-sm"
+                        title="Approve candidate"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
                         <span>Approve</span>
                       </button>
                     )}
 
+                    <button
+                      onClick={() => openWhatsAppModal(player, 'correction')}
+                      className="px-2 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs border border-amber-300 transition-colors flex items-center space-x-1"
+                      title="Suggest correction and send notice via WhatsApp"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Correction</span>
+                    </button>
+
                     {player.status !== 'rejected' && (
                       <button
-                        onClick={() => setRejectModalPlayer(player)}
-                        className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs border border-red-200 transition-colors flex items-center space-x-1"
+                        onClick={() => openWhatsAppModal(player, 'rejection')}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs border border-red-200 transition-colors flex items-center space-x-1"
+                        title="Reject player and send WhatsApp notice"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         <span>Reject</span>
-                      </button>
-                    )}
-
-                    {player.status === 'pending' && (
-                      <button
-                        onClick={() => handleRequestCorrection(player)}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 transition-colors"
-                        title="Request Correction"
-                      >
-                        Correction
                       </button>
                     )}
                   </div>
@@ -451,6 +647,538 @@ export const PlayerVerification: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: EDIT RATINGS AND SET TIER */}
+      {/* ============================================================ */}
+      {editingRatingsPlayer && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 mb-4 border-b border-slate-200">
+              <div className="flex items-center space-x-3">
+                <img
+                  src={editingRatingsPlayer.photoUrl}
+                  alt={editingRatingsPlayer.fullName}
+                  className="w-14 h-14 rounded-xl object-cover border-2 border-electric shadow-sm"
+                />
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-mono text-[10px] font-bold text-slate-400">
+                      {editingRatingsPlayer.regNumber}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-electric font-bold border border-blue-200">
+                      {editingRatingsPlayer.playingRole}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900">{editingRatingsPlayer.fullName}</h3>
+                  <p className="text-xs text-slate-500">
+                    Fine-tune cricket skill scores and set auction tier
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingRatingsPlayer(null)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="space-y-4 text-xs">
+              {/* Batting Rating */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>🏏 Batting Rating</span>
+                    <span className="font-mono text-electric font-black text-sm">
+                      {editIsBattingNA ? 'N/A' : `${editBattingRating}/10`}
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-slate-500 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editIsBattingNA}
+                      onChange={(e) => {
+                        setEditIsBattingNA(e.target.checked);
+                        if (e.target.checked) setEditBattingRating(null);
+                        else setEditBattingRating(7);
+                      }}
+                      className="rounded text-electric focus:ring-electric"
+                    />
+                    <span>Not Applicable</span>
+                  </label>
+                </div>
+
+                {!editIsBattingNA && (
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editBattingRating || 5}
+                      onChange={(e) => setEditBattingRating(Number(e.target.value))}
+                      className="flex-1 accent-electric cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editBattingRating || ''}
+                      onChange={(e) => setEditBattingRating(Math.min(10, Math.max(1, Number(e.target.value))))}
+                      className="w-14 p-1.5 text-center font-bold font-mono rounded-lg border border-slate-300 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Bowling Rating */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>🎯 Bowling Rating</span>
+                    <span className="font-mono text-royal font-black text-sm">
+                      {editIsBowlingNA ? 'N/A' : `${editBowlingRating}/10`}
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-slate-500 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editIsBowlingNA}
+                      onChange={(e) => {
+                        setEditIsBowlingNA(e.target.checked);
+                        if (e.target.checked) setEditBowlingRating(null);
+                        else setEditBowlingRating(6);
+                      }}
+                      className="rounded text-royal focus:ring-royal"
+                    />
+                    <span>Not Applicable</span>
+                  </label>
+                </div>
+
+                {!editIsBowlingNA && (
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editBowlingRating || 5}
+                      onChange={(e) => setEditBowlingRating(Number(e.target.value))}
+                      className="flex-1 accent-royal cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editBowlingRating || ''}
+                      onChange={(e) => setEditBowlingRating(Math.min(10, Math.max(1, Number(e.target.value))))}
+                      className="w-14 p-1.5 text-center font-bold font-mono rounded-lg border border-slate-300 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Wicketkeeping Rating */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>🧤 Wicketkeeping Rating</span>
+                    <span className="font-mono text-emerald-600 font-black text-sm">
+                      {editIsKeepingNA ? 'N/A' : `${editKeepingRating}/10`}
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-slate-500 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editIsKeepingNA}
+                      onChange={(e) => {
+                        setEditIsKeepingNA(e.target.checked);
+                        if (e.target.checked) setEditKeepingRating(null);
+                        else setEditKeepingRating(5);
+                      }}
+                      className="rounded text-emerald-600 focus:ring-emerald-600"
+                    />
+                    <span>Not Applicable</span>
+                  </label>
+                </div>
+
+                {!editIsKeepingNA && (
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editKeepingRating || 5}
+                      onChange={(e) => setEditKeepingRating(Number(e.target.value))}
+                      className="flex-1 accent-emerald-600 cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={editKeepingRating || ''}
+                      onChange={(e) => setEditKeepingRating(Math.min(10, Math.max(1, Number(e.target.value))))}
+                      className="w-14 p-1.5 text-center font-bold font-mono rounded-lg border border-slate-300 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Live Rating & Tier Assignment Section */}
+              <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-amber-800 tracking-wider block">
+                      Skill Evaluation Score
+                    </span>
+                    <span className="text-sm font-black text-slate-900">
+                      Highest Rating: {editMaxRating > 0 ? `${editMaxRating}/10` : 'None'}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 block">Formula Suggestion</span>
+                    <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                      {autoTierPreview?.name || 'Default Tier'}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    🎯 Assign Auction Tier (Manual Override or Auto)
+                  </label>
+                  <select
+                    value={editTierId}
+                    onChange={(e) => setEditTierId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-amber-300 bg-white text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-amber-400"
+                  >
+                    <option value="auto">
+                      ⚡ Auto Calculate (Based on ratings: {autoTierPreview?.name})
+                    </option>
+                    {store.tiers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} (Base Bid: ₹{t.minBid.toLocaleString('en-IN')})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Selecting a specific tier manually fixes this player's auction tier, opening bid, and calling bracket.
+                  </p>
+                </div>
+              </div>
+
+              {/* Admin Note */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Administrator Audit Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="e.g. Verified by chief scout, elevated to Tier 1 for power-hitting"
+                  className="w-full p-2 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
+
+              {ratingsSaveSuccess && (
+                <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl border border-emerald-300 text-xs font-bold flex items-center space-x-2">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>Ratings and Tier updated successfully! Synced to Supabase Cloud.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="mt-5 flex items-center justify-end space-x-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setEditingRatingsPlayer(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingRatings}
+                onClick={handleSaveRatingsAndTier}
+                className="px-5 py-2.5 rounded-xl bg-electric hover:bg-electric-hover text-white text-xs font-bold shadow-md transition-colors flex items-center space-x-1.5 disabled:opacity-60"
+              >
+                {isSavingRatings ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving to Cloud...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Save Ratings & Tier</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: REJECT OR SUGGEST CORRECTION WITH WHATSAPP INTEGRATION */}
+      {/* ============================================================ */}
+      {whatsappModalPlayer && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-3 mb-3 border-b border-slate-200">
+              <div className="flex items-center space-x-3">
+                <img
+                  src={whatsappModalPlayer.photoUrl}
+                  alt={whatsappModalPlayer.fullName}
+                  className="w-12 h-12 rounded-xl object-cover border-2 border-slate-200"
+                />
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="font-mono text-[10px] font-bold text-slate-400">
+                      {whatsappModalPlayer.regNumber}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
+                      {whatsappModalPlayer.playingRole}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900">{whatsappModalPlayer.fullName}</h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setWhatsappModalPlayer(null)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Notice Type Switcher (Reject vs Correction) */}
+            <div className="grid grid-cols-2 gap-2 mb-4 bg-slate-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setNoticeType('rejection');
+                  setNoticeReason('Did not meet tournament eligibility criteria');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                  noticeType === 'rejection'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Reject Player</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setNoticeType('correction');
+                  setNoticeReason('Please upload a clear front-facing passport photograph');
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                  noticeType === 'correction'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Suggest Correction</span>
+              </button>
+            </div>
+
+            {/* Recipient Phone with WhatsApp verification hint */}
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>📱 Player WhatsApp Phone Number:</span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Formatted: <code className="font-mono text-slate-600">+{formatWhatsAppPhoneNumber(noticePhone || whatsappModalPlayer.phone)}</code>
+                  </span>
+                </label>
+                <input
+                  type="tel"
+                  value={noticePhone}
+                  onChange={(e) => setNoticePhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Quick Presets Chips */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">
+                  ⚡ Quick Reason Presets (Click to choose):
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(noticeType === 'rejection' ? REJECTION_PRESETS : CORRECTION_PRESETS).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNoticeReason(preset)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg border text-left transition-colors ${
+                        noticeReason === preset
+                          ? noticeType === 'rejection'
+                            ? 'bg-red-50 text-red-700 border-red-300 font-bold'
+                            : 'bg-amber-50 text-amber-800 border-amber-300 font-bold'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reason / Details Textarea */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {noticeType === 'rejection' ? 'Rejection Reason (Sent to Player):' : 'Suggested Corrections Needed:'}
+                </label>
+                <textarea
+                  rows={3}
+                  value={noticeReason}
+                  onChange={(e) => setNoticeReason(e.target.value)}
+                  placeholder="Provide specific notes or correction directions..."
+                  className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Device Detection Banner */}
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  {currentDeviceIsMobile ? (
+                    <Smartphone className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Monitor className="w-4 h-4 text-blue-600" />
+                  )}
+                  <div>
+                    <span className="font-bold text-slate-800 block text-[11px]">
+                      {currentDeviceIsMobile ? 'Detected: Mobile Phone' : 'Detected: Desktop PC'}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {currentDeviceIsMobile
+                        ? 'Will automatically launch WhatsApp Mobile App'
+                        : 'Will launch WhatsApp Web (web.whatsapp.com) in browser'}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Ready
+                </span>
+              </div>
+
+              {/* Live WhatsApp Message Preview */}
+              <div>
+                <span className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Preview of WhatsApp Message:
+                </span>
+                <div className="bg-[#e7f7e9] p-3 rounded-xl border border-emerald-200 text-slate-800 text-[11px] whitespace-pre-wrap font-sans max-h-36 overflow-y-auto shadow-inner leading-relaxed">
+                  {buildWhatsAppMessage({
+                    fullName: whatsappModalPlayer.fullName,
+                    regNumber: whatsappModalPlayer.regNumber,
+                    type: noticeType,
+                    reason: noticeReason.trim() || 'No specific reason provided',
+                    tournamentTitle: store.config.title || 'SMYS INTRA HOSTEL CRICKET AUCTION 2026',
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Action Buttons */}
+            <div className="mt-5 space-y-2 pt-3 border-t border-slate-200">
+              {/* Primary Action Button */}
+              <button
+                type="button"
+                disabled={isUpdatingStatus}
+                onClick={() => handleConfirmWhatsAppNotice()}
+                className={`w-full py-2.5 rounded-xl text-white font-bold text-xs shadow-md transition-all flex items-center justify-center space-x-2 ${
+                  noticeType === 'rejection'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                } disabled:opacity-60`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {noticeType === 'rejection'
+                    ? 'Reject Player & Send WhatsApp Notice'
+                    : 'Request Correction & Send WhatsApp Notice'}
+                </span>
+              </button>
+
+              {/* Specific Platform Fallback / Secondary Actions */}
+              <div className="grid grid-cols-3 gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => handleConfirmWhatsAppNotice('web')}
+                  className="py-1.5 px-2 rounded-lg border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 transition-colors flex items-center justify-center space-x-1"
+                  title="Force open in WhatsApp Web"
+                >
+                  <Monitor className="w-3 h-3 text-blue-500" />
+                  <span>WhatsApp Web</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleConfirmWhatsAppNotice('mobile')}
+                  className="py-1.5 px-2 rounded-lg border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 transition-colors flex items-center justify-center space-x-1"
+                  title="Force open in WhatsApp App"
+                >
+                  <Smartphone className="w-3 h-3 text-emerald-600" />
+                  <span>WhatsApp App</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className="py-1.5 px-2 rounded-lg border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 transition-colors flex items-center justify-center space-x-1"
+                  title="Copy text to clipboard"
+                >
+                  {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-slate-500" />}
+                  <span>{isCopied ? 'Copied!' : 'Copy Text'}</span>
+                </button>
+              </div>
+
+              {/* Dismiss / Save without WhatsApp option */}
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanReason = noticeReason.trim() || 'No specific reason provided';
+                    if (noticeType === 'rejection') {
+                      store.verifyPlayer(whatsappModalPlayer.id, 'rejected', cleanReason, 'Chief Administrator');
+                    } else {
+                      store.verifyPlayer(whatsappModalPlayer.id, 'pending', `Correction: ${cleanReason}`, 'Chief Administrator');
+                    }
+                    setWhatsappModalPlayer(null);
+                  }}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+                >
+                  Save status to database only (skip WhatsApp)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWhatsappModalPlayer(null)}
+                  className="px-3 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -498,6 +1226,7 @@ export const PlayerVerification: React.FC = () => {
                     <option value="Post-Grad">Post-Grad</option>
                   </select>
                 </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Phone Number</label>
                   <input
@@ -546,18 +1275,36 @@ export const PlayerVerification: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Playing Role</label>
-                <select
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as PlayingRole)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
-                >
-                  <option value="Batsman">Batsman</option>
-                  <option value="Bowler">Bowler</option>
-                  <option value="All-Rounder">All-Rounder</option>
-                  <option value="Wicket-Keeper">Wicket-Keeper</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Playing Role</label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value as PlayingRole)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  >
+                    <option value="Batsman">Batsman</option>
+                    <option value="Bowler">Bowler</option>
+                    <option value="All-Rounder">All-Rounder</option>
+                    <option value="Wicket-Keeper">Wicket-Keeper</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Auction Tier</label>
+                  <select
+                    value={newTierChoice}
+                    onChange={(e) => setNewTierChoice(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white font-semibold"
+                  >
+                    <option value="auto">⚡ Auto (Based on Ratings)</option>
+                    {store.tiers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -695,50 +1442,6 @@ export const PlayerVerification: React.FC = () => {
         </div>
       )}
 
-      {/* Reject Reason Modal */}
-      {rejectModalPlayer && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
-            <div className="flex items-center space-x-2 text-red-600 font-bold text-sm mb-2">
-              <AlertTriangle className="w-5 h-5" />
-              <span>Reject Registration</span>
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">
-              Reject {rejectModalPlayer.fullName} ({rejectModalPlayer.regNumber})?
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Rejected players will be excluded from the live auction calling queue.
-            </p>
-
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Reason / Administrator Notes:
-            </label>
-            <textarea
-              rows={3}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="e.g. Ineligible semester / Missing hostel ID confirmation"
-              className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
-            />
-
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setRejectModalPlayer(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRejectConfirm}
-                className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700 shadow-md"
-              >
-                Confirm Rejection
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Full Profile View Modal */}
       {selectedPlayer && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
@@ -807,22 +1510,47 @@ export const PlayerVerification: React.FC = () => {
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl space-y-2">
-                <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">
-                  Skill Evaluation (1-10)
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">
+                    Skill Evaluation & Auction Tier
+                  </h4>
+                  <button
+                    onClick={() => {
+                      const p = selectedPlayer;
+                      setSelectedPlayer(null);
+                      openEditRatingsModal(p);
+                    }}
+                    className="text-electric hover:underline text-[11px] font-bold flex items-center space-x-1"
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>Edit Ratings & Tier</span>
+                  </button>
+                </div>
                 <div className="flex justify-between">
                   <span>Batting:</span>
-                  <span className="font-bold">{selectedPlayer.battingRating ?? 'NA'}/10</span>
+                  <span className="font-bold">{selectedPlayer.battingRating !== null ? `${selectedPlayer.battingRating}/10` : 'NA'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Bowling:</span>
-                  <span className="font-bold">{selectedPlayer.bowlingRating ?? 'NA'}/10</span>
+                  <span className="font-bold">{selectedPlayer.bowlingRating !== null ? `${selectedPlayer.bowlingRating}/10` : 'NA'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Wicketkeeping:</span>
-                  <span className="font-bold">{selectedPlayer.wicketkeepingRating ?? 'NA'}/10</span>
+                  <span className="font-bold">{selectedPlayer.wicketkeepingRating !== null ? `${selectedPlayer.wicketkeepingRating}/10` : 'NA'}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-slate-200">
+                  <span className="font-bold text-slate-700">Assigned Auction Tier:</span>
+                  <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    {store.getPlayerTier(selectedPlayer).name}
+                  </span>
                 </div>
               </div>
+
+              {selectedPlayer.verificationNotes && (
+                <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-slate-700">
+                  <span className="font-bold">Audit Note:</span> {selectedPlayer.verificationNotes}
+                </div>
+              )}
 
               {selectedPlayer.verifiedBy && (
                 <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
@@ -831,7 +1559,32 @@ export const PlayerVerification: React.FC = () => {
               )}
             </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="mt-5 flex items-center justify-between pt-3 border-t border-slate-100">
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() => {
+                    const p = selectedPlayer;
+                    setSelectedPlayer(null);
+                    openWhatsAppModal(p, 'correction');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs border border-amber-300 transition-colors flex items-center space-x-1"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Suggest Correction</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const p = selectedPlayer;
+                    setSelectedPlayer(null);
+                    openWhatsAppModal(p, 'rejection');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs border border-red-200 transition-colors flex items-center space-x-1"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Reject</span>
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedPlayer(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-xs"

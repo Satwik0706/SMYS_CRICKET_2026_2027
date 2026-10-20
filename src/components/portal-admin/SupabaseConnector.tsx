@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS player_registrations (
   verified_by TEXT,
   verified_at TIMESTAMPTZ,
   assigned_team_id TEXT REFERENCES teams(id),
+  tier_id TEXT REFERENCES auction_tiers(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

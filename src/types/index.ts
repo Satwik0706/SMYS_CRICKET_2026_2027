@@ -46,7 +46,7 @@ export interface PlayerRegistration {
   verifiedAt?: string;
   createdAt: string;
   assignedTeamId?: string | null;
-  tierId?: string;
+  tierId?: string | null;
 }
 
 export interface Team {

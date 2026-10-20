@@ -257,6 +257,7 @@ export async function pushTournamentDataToSupabase(data: {
         verified_by: p.verifiedBy || null,
         verified_at: p.verifiedAt ? new Date(p.verifiedAt).toISOString() : null,
         assigned_team_id: p.assignedTeamId || null,
+        tier_id: p.tierId || null,
       }));
       await client.from('player_registrations').upsert(playersPayload, { onConflict: 'id' });
     }
@@ -408,6 +409,7 @@ export async function pullTournamentDataFromSupabase(): Promise<{
       verifiedAt: p.verified_at,
       createdAt: p.created_at,
       assignedTeamId: p.assigned_team_id,
+      tierId: p.tier_id || null,
     }));
 
     const tiers: AuctionTier[] = (tiersData || []).map((tier) => ({
