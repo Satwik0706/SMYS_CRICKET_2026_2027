@@ -78,8 +78,8 @@ export class TournamentStore {
   public sales: SaleRecord[] = [];
   public auditLogs: AuditLog[] = [];
   public activeTeamId: string | null = null;
-  public adminId: string = 'admin';
-  public adminPasswordHash: string = 'admin123';
+  public adminId: string = (import.meta.env.VITE_ADMIN_ID || 'admin').trim();
+  public adminPasswordHash: string = (import.meta.env.VITE_ADMIN_PASSWORD || 'admin123').trim();
   public isAdminAuth: boolean = false;
   public activePlayerId: string | null = null;
 
@@ -895,13 +895,25 @@ export class TournamentStore {
       this.auctionState.isTimerRunning = false;
     }
 
+    // Check if player was sold and calculate refund for the purchasing team
+    const sale = this.sales.find((s) => s.playerId === playerId);
+    let refundInfo = '';
+    let affectedTeamId: string | null = null;
+
+    if (sale) {
+      affectedTeamId = sale.teamId;
+      const team = this.teams.find((t) => t.id === sale.teamId);
+      const teamName = team ? team.name : sale.teamName;
+      refundInfo = ` Refunded ₹${sale.finalPrice.toLocaleString('en-IN')} back to team "${teamName}".`;
+    }
+
     // Remove any sales or bids for this player
     this.sales = this.sales.filter((s) => s.playerId !== playerId);
     this.bids = this.bids.filter((b) => b.playerId !== playerId);
 
     this.players.splice(playerIndex, 1);
     this.recalculateTeamStats();
-    this.addAuditLog('Player Deleted', 'Administrator', `Deleted player ${playerName}`);
+    this.addAuditLog('Player Deleted', 'Administrator', `Deleted player ${playerName}.${refundInfo}`);
     this.saveToStorage();
     this.broadcastRealtime('PLAYER_DELETED', { playerId });
     this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
@@ -909,9 +921,82 @@ export class TournamentStore {
     const client = getSupabase();
     if (client) {
       safeSync(client.from('player_registrations').delete().eq('id', playerId));
+      safeSync(client.from('sales').delete().eq('player_id', playerId));
+      safeSync(client.from('bids').delete().eq('player_id', playerId));
+      if (affectedTeamId) {
+        const updatedTeam = this.teams.find((t) => t.id === affectedTeamId);
+        if (updatedTeam) {
+          safeSync(
+            client
+              .from('teams')
+              .update({
+                remaining_purse: updatedTeam.remainingPurse,
+                spent_purse: updatedTeam.spentPurse,
+                players_count: updatedTeam.playersCount,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', updatedTeam.id)
+          );
+        }
+      }
     }
 
-    return { success: true, message: `Player "${playerName}" deleted successfully` };
+    return { success: true, message: `Player "${playerName}" deleted successfully.${refundInfo}` };
+  }
+
+  public cancelSaleAndRefund(playerId: string): { success: boolean; message: string } {
+    const saleIndex = this.sales.findIndex((s) => s.playerId === playerId);
+    if (saleIndex === -1) {
+      return { success: false, message: 'Sale record not found for this player' };
+    }
+    const sale = this.sales[saleIndex];
+    const team = this.teams.find((t) => t.id === sale.teamId);
+    const player = this.players.find((p) => p.id === playerId);
+    const refundAmount = sale.finalPrice;
+    const teamName = team ? team.name : sale.teamName;
+    const playerName = player ? player.fullName : sale.playerName;
+
+    if (player) {
+      player.assignedTeamId = null;
+    }
+    this.sales.splice(saleIndex, 1);
+    this.bids = this.bids.filter((b) => b.playerId !== playerId);
+
+    this.recalculateTeamStats();
+    this.addAuditLog(
+      'Sale Cancelled & Refunded',
+      'Administrator',
+      `Cancelled purchase of ${playerName}. Refunded ₹${refundAmount.toLocaleString('en-IN')} back to team "${teamName}".`
+    );
+    this.saveToStorage();
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
+
+    const client = getSupabase();
+    if (client) {
+      safeSync(client.from('sales').delete().eq('player_id', playerId));
+      safeSync(client.from('bids').delete().eq('player_id', playerId));
+      if (player) {
+        safeSync(client.from('player_registrations').update({ assigned_team_id: null }).eq('id', playerId));
+      }
+      if (team) {
+        safeSync(
+          client
+            .from('teams')
+            .update({
+              remaining_purse: team.remainingPurse,
+              spent_purse: team.spentPurse,
+              players_count: team.playersCount,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', team.id)
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: `Sale cancelled for ${playerName}. ₹${refundAmount.toLocaleString('en-IN')} refunded to ${teamName}.`,
+    };
   }
 
   public async addPlayerByAdmin(
@@ -1118,25 +1203,68 @@ export class TournamentStore {
     }
     const teamName = this.teams[teamIndex].name;
 
-    const hasBoughtPlayers = this.sales.some((s) => s.teamId === id);
-    if (hasBoughtPlayers) {
-      return {
-        success: false,
-        message: `Cannot delete "${teamName}" because it already has acquired players in the live auction. Reset the auction or release players first.`,
-      };
+    // Check if this team has acquired players in the auction
+    const teamSales = this.sales.filter((s) => s.teamId === id);
+    const releasedPlayerIds = teamSales.map((s) => s.playerId);
+
+    // Release all players acquired by this team back to the auction pool
+    this.players.forEach((p) => {
+      if (p.assignedTeamId === id || releasedPlayerIds.includes(p.id)) {
+        p.assignedTeamId = null;
+      }
+    });
+
+    // Remove sales and bids associated with this team
+    this.sales = this.sales.filter((s) => s.teamId !== id);
+    this.bids = this.bids.filter((b) => b.teamId !== id);
+
+    // Reset current bidder if this team was the active bidder
+    if (this.auctionState.currentBidderTeamId === id) {
+      this.auctionState.currentBidderTeamId = null;
+    }
+
+    // Logout active team session if currently logged into this team
+    if (this.activeTeamId === id) {
+      this.activeTeamId = null;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY_TEAM_AUTH);
+      }
     }
 
     this.teams.splice(teamIndex, 1);
-    this.addAuditLog('Team Deleted', 'Administrator', `Deleted team "${teamName}"`);
+    this.recalculateTeamStats();
+
+    const auditDetail =
+      teamSales.length > 0
+        ? `Deleted team "${teamName}". Released ${teamSales.length} player(s) back to auction pool.`
+        : `Deleted team "${teamName}"`;
+
+    this.addAuditLog('Team Deleted', 'Administrator', auditDetail);
     this.saveToStorage();
     this.broadcastRealtime('TEAMS_UPDATED', this.teams);
+    this.broadcastRealtime('FULL_STATE_SYNC', this.getFullState());
 
     const client = getSupabase();
     if (client) {
+      safeSync(client.from('sales').delete().eq('team_id', id));
+      safeSync(client.from('bids').delete().eq('team_id', id));
+      if (releasedPlayerIds.length > 0) {
+        safeSync(
+          client
+            .from('player_registrations')
+            .update({ assigned_team_id: null })
+            .in('id', releasedPlayerIds)
+        );
+      }
       safeSync(client.from('teams').delete().eq('id', id));
     }
 
-    return { success: true, message: `Team "${teamName}" deleted successfully` };
+    const feedbackMsg =
+      teamSales.length > 0
+        ? `Team "${teamName}" deleted successfully. Released ${teamSales.length} player(s) back to auction pool.`
+        : `Team "${teamName}" deleted successfully`;
+
+    return { success: true, message: feedbackMsg };
   }
 
   public resetTeamCredentials(id: string, newPassword: string) {
@@ -1223,13 +1351,19 @@ export class TournamentStore {
   }
 
   public loginAdmin(id: string, password: string): { success: boolean; message: string } {
-    if (
-      id.trim().toLowerCase() === this.adminId.toLowerCase() &&
-      password.trim() === this.adminPasswordHash
-    ) {
+    const trimmedId = id.trim().toLowerCase();
+    const trimmedPass = password.trim();
+    const defaultId = (import.meta.env.VITE_ADMIN_ID || 'admin').trim().toLowerCase();
+    const defaultPass = (import.meta.env.VITE_ADMIN_PASSWORD || 'admin123').trim();
+
+    const isMatch =
+      (trimmedId === this.adminId.toLowerCase() && trimmedPass === this.adminPasswordHash) ||
+      (trimmedId === defaultId && trimmedPass === defaultPass);
+
+    if (isMatch) {
       this.isAdminAuth = true;
       localStorage.setItem(STORAGE_KEY_ADMIN_AUTH, 'true');
-      this.addAuditLog('Admin Login Successful', this.adminId, 'Administrator authenticated into Control Centre');
+      this.addAuditLog('Admin Login Successful', id, 'Administrator authenticated into Control Centre');
       this.notify();
       return { success: true, message: 'Welcome Administrator!' };
     }

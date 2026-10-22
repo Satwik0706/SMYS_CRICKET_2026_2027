@@ -1410,37 +1410,56 @@ export const PlayerVerification: React.FC = () => {
       )}
 
       {/* Modal: Delete Player Confirmation */}
-      {deletingPlayer && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
-            <div className="flex items-center space-x-2 text-red-600 font-bold text-sm mb-2">
-              <AlertTriangle className="w-5 h-5" />
-              <span>Delete Player</span>
-            </div>
-            <h3 className="text-base font-bold text-slate-900 mb-2">
-              Delete {deletingPlayer.fullName} ({deletingPlayer.regNumber})?
-            </h3>
-            <p className="text-xs text-slate-600 mb-4">
-              This will permanently remove this player from the directory and auction pool.
-            </p>
+      {deletingPlayer && (() => {
+        const soldRecord = store.sales.find((s) => s.playerId === deletingPlayer.id);
 
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setDeletingPlayer(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md"
-              >
-                Confirm Delete
-              </button>
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex items-center space-x-2 text-red-600 font-bold text-sm mb-2">
+                <AlertTriangle className="w-5 h-5" />
+                <span>Delete Player</span>
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-2">
+                Delete {deletingPlayer.fullName} ({deletingPlayer.regNumber})?
+              </h3>
+              <p className="text-xs text-slate-600 mb-3">
+                This will permanently remove this player from the directory and tournament pool.
+              </p>
+
+              {soldRecord && (
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1 mb-4">
+                  <p className="font-bold flex items-center space-x-1 text-emerald-800">
+                    <span>💰 Sold Player Refund Guarantee</span>
+                  </p>
+                  <p>
+                    This player was acquired by <strong>{soldRecord.teamName}</strong> for{' '}
+                    <strong>₹{soldRecord.finalPrice.toLocaleString('en-IN')}</strong>.
+                  </p>
+                  <p className="text-[11px] text-emerald-800">
+                    Deleting this player will <strong>automatically refund ₹{soldRecord.finalPrice.toLocaleString('en-IN')}</strong> back to <strong>{soldRecord.teamName}</strong>'s purse and restore 1 roster slot.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={() => setDeletingPlayer(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md"
+                >
+                  {soldRecord ? 'Confirm Delete & Refund' : 'Confirm Delete'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Full Profile View Modal */}
       {selectedPlayer && (
