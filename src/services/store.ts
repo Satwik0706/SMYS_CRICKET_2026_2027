@@ -181,7 +181,7 @@ export class TournamentStore {
           this.teams = res.data.teams;
         }
         if (res.data.tiers && res.data.tiers.length > 0) {
-          this.tiers = res.data.tiers;
+          this.tiers = [...res.data.tiers].sort((a, b) => this.compareTiers(a, b));
         }
         if (res.data.sales) {
           this.sales = res.data.sales;
@@ -595,7 +595,8 @@ export class TournamentStore {
 
       this.players = storedPlayers ? JSON.parse(storedPlayers) : [];
       this.teams = storedTeams ? JSON.parse(storedTeams) : [];
-      this.tiers = storedTiers ? JSON.parse(storedTiers) : [...INITIAL_TIERS];
+      const rawTiers: AuctionTier[] = storedTiers ? JSON.parse(storedTiers) : [...INITIAL_TIERS];
+      this.tiers = rawTiers.sort((a, b) => this.compareTiers(a, b));
       this.config = storedConfig ? JSON.parse(storedConfig) : { ...INITIAL_CONFIG };
       this.auctionState = storedAuction ? JSON.parse(storedAuction) : { ...this.auctionState };
       this.bids = storedBids ? JSON.parse(storedBids) : [];
@@ -1574,8 +1575,36 @@ export class TournamentStore {
 
   // --- Tier & Configuration ---
 
+  public getTierRank(tier: AuctionTier): number {
+    if (typeof tier.priority === 'number' && !isNaN(tier.priority) && tier.priority > 0) {
+      return tier.priority;
+    }
+    const idx = this.tiers.findIndex((t) => t.id === tier.id);
+    if (idx !== -1) return idx + 1;
+    if (tier.minBid) return 100000000 - tier.minBid;
+    return 999;
+  }
+
+  public compareTiers(tierA: AuctionTier, tierB: AuctionTier): number {
+    const rankA = this.getTierRank(tierA);
+    const rankB = this.getTierRank(tierB);
+    if (rankA !== rankB) return rankA - rankB; // Lower priority number (1) = Higher Tier (Tier 1 before Tier 2)
+    if ((tierB.minBid || 0) !== (tierA.minBid || 0)) {
+      return (tierB.minBid || 0) - (tierA.minBid || 0); // Higher minBid first
+    }
+    return (tierB.minRating || 0) - (tierA.minRating || 0);
+  }
+
+  public getPlayerMaxRating(player: PlayerRegistration): number {
+    return Math.max(
+      player.battingRating || 0,
+      player.bowlingRating || 0,
+      player.wicketkeepingRating || 0
+    );
+  }
+
   public updateTiers(newTiers: AuctionTier[]) {
-    this.tiers = newTiers;
+    this.tiers = [...newTiers].sort((a, b) => this.compareTiers(a, b));
     this.addAuditLog('Auction Tiers Updated', 'Administrator', 'Modified auction tiers and bid thresholds');
     this.saveToStorage();
   }
@@ -1594,11 +1623,7 @@ export class TournamentStore {
       if (explicit) return explicit;
     }
 
-    const maxRating = Math.max(
-      player.battingRating || 0,
-      player.bowlingRating || 0,
-      player.wicketkeepingRating || 0
-    );
+    const maxRating = this.getPlayerMaxRating(player);
 
     const matched = this.tiers.find(
       (tier) => maxRating >= tier.minRating && maxRating <= tier.maxRating
@@ -1607,11 +1632,36 @@ export class TournamentStore {
     return matched || this.tiers[this.tiers.length - 1] || INITIAL_TIERS[0];
   }
 
-  public getEligibleQueue(): PlayerRegistration[] {
+  public getEligibleQueue(filterTierId?: string): PlayerRegistration[] {
     const soldPlayerIds = new Set(this.sales.map((s) => s.playerId));
-    return this.players.filter(
+    let eligible = this.players.filter(
       (p) => p.status === 'verified' && !soldPlayerIds.has(p.id)
     );
+
+    if (filterTierId && filterTierId !== 'all') {
+      eligible = eligible.filter((p) => this.getPlayerTier(p).id === filterTierId);
+    }
+
+    // STRICT CALLING QUEUE ORDER: Higher Tier to Lower Tier (regardless of registration time)
+    return [...eligible].sort((a, b) => {
+      const tierA = this.getPlayerTier(a);
+      const tierB = this.getPlayerTier(b);
+
+      const tierComparison = this.compareTiers(tierA, tierB);
+      if (tierComparison !== 0) {
+        return tierComparison; // Higher tier first (Tier 1 -> Tier 2 -> Tier 3 -> Tier 4)
+      }
+
+      // Within the same tier: highest skill rating first
+      const ratingA = this.getPlayerMaxRating(a);
+      const ratingB = this.getPlayerMaxRating(b);
+      if (ratingB !== ratingA) {
+        return ratingB - ratingA;
+      }
+
+      // Tie-breaker within same tier and rating: registration ID
+      return (a.regNumber || '').localeCompare(b.regNumber || '');
+    });
   }
 
   public callPlayer(playerId: string, mode: AuctionCallMode = 'queue') {
@@ -1661,8 +1711,8 @@ export class TournamentStore {
     }
   }
 
-  public callNextEligiblePlayer() {
-    const eligible = this.getEligibleQueue();
+  public callNextEligiblePlayer(targetTierId?: string) {
+    const eligible = this.getEligibleQueue(targetTierId);
     const nextList = eligible.filter((p) => p.id !== this.auctionState.currentPlayerId);
     if (nextList.length > 0) {
       this.callPlayer(nextList[0].id, 'queue');

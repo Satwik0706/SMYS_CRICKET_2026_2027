@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Gavel,
   Play,
@@ -21,16 +21,37 @@ import { PlayerRegistration, Team } from '../../types';
 export const LiveAuctionControl: React.FC = () => {
   const store = useTournamentStore();
 
+  const [selectedTierFilter, setSelectedTierFilter] = useState<string>('all');
   const [queueSearch, setQueueSearch] = useState('');
   const [isConfirmSaleModalOpen, setIsConfirmSaleModalOpen] = useState(false);
   const [manualCallPlayerId, setManualCallPlayerId] = useState('');
   const [adminCustomBid, setAdminCustomBid] = useState<number | ''>('');
   const [selectedBidTeamId, setSelectedBidTeamId] = useState<string>('');
 
-  const eligibleQueue = store.getEligibleQueue();
+  const allEligibleQueue = useMemo(
+    () => store.getEligibleQueue(),
+    [store.players, store.sales, store.tiers]
+  );
+  const eligibleQueue = useMemo(
+    () => store.getEligibleQueue(selectedTierFilter),
+    [store.players, store.sales, store.tiers, selectedTierFilter]
+  );
+
+  const tierCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allEligibleQueue.forEach((p) => {
+      const t = store.getPlayerTier(p);
+      counts[t.id] = (counts[t.id] || 0) + 1;
+    });
+    return counts;
+  }, [allEligibleQueue, store]);
+
   const currentPlayer = store.players.find((p) => p.id === store.auctionState.currentPlayerId);
   const currentBidderTeam = store.teams.find((t) => t.id === store.auctionState.currentBidderTeamId);
   const currentTier = currentPlayer ? store.getPlayerTier(currentPlayer) : null;
+
+  const nextPlayerOnDeck = eligibleQueue.find((p) => p.id !== store.auctionState.currentPlayerId);
+  const nextTierOnDeck = nextPlayerOnDeck ? store.getPlayerTier(nextPlayerOnDeck) : null;
 
   const filteredQueue = eligibleQueue.filter((p) => {
     return (
@@ -45,7 +66,7 @@ export const LiveAuctionControl: React.FC = () => {
   };
 
   const handleCallNext = () => {
-    store.callNextEligiblePlayer();
+    store.callNextEligiblePlayer(selectedTierFilter);
   };
 
   const handleToggleTimer = () => {
@@ -154,81 +175,159 @@ export const LiveAuctionControl: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left Column: Player Queue (3 cols) */}
         <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col h-[640px]">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+          <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-2">
             <div>
-              <h3 className="font-extrabold text-sm text-slate-900">Calling Queue</h3>
+              <div className="flex items-center space-x-1.5">
+                <h3 className="font-extrabold text-sm text-slate-900">Calling Queue</h3>
+                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-tight">
+                  Tier-Ranked
+                </span>
+              </div>
               <p className="text-[11px] text-slate-400">
-                {eligibleQueue.length} verified players in pool
+                {eligibleQueue.length} in pool • Higher tier first
               </p>
             </div>
             <button
               onClick={handleCallNext}
-              className="text-[11px] bg-electric/10 text-electric hover:bg-electric hover:text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+              className="text-[11px] bg-electric/10 text-electric hover:bg-electric hover:text-white px-2.5 py-1 rounded-lg font-bold transition-all shadow-sm"
+              title="Call next player according to higher tier priority"
             >
               Call Next →
             </button>
           </div>
 
+          {/* Tier Call Hierarchy Notice */}
+          <div className="mb-2 p-2 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between">
+            <span className="font-semibold flex items-center gap-1 text-[10px] text-slate-500 uppercase tracking-wider">
+              <span>⚡ Priority:</span>
+              <strong className="text-slate-800">Tier 1 → Tier 4</strong>
+            </span>
+            {nextTierOnDeck && (
+              <span className="text-[10px] font-bold text-electric">
+                Next: {nextTierOnDeck.name.split('—')[0]}
+              </span>
+            )}
+          </div>
+
+          {/* Tier Filter Tabs */}
+          <div className="flex items-center gap-1 pb-2 overflow-x-auto no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setSelectedTierFilter('all')}
+              className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all ${
+                selectedTierFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              All ({allEligibleQueue.length})
+            </button>
+            {store.tiers.map((t) => {
+              const count = tierCounts[t.id] || 0;
+              const isSelected = selectedTierFilter === t.id;
+              const shortName = t.name.split('—')[0].trim();
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSelectedTierFilter(t.id)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all flex items-center space-x-1 ${
+                    isSelected
+                      ? 'bg-electric text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>{shortName}</span>
+                  <span
+                    className={`text-[9px] px-1 py-0.2 rounded-full ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* Search queue */}
-          <div className="relative mb-3">
+          <div className="relative mb-2">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
             <input
               type="text"
               value={queueSearch}
               onChange={(e) => setQueueSearch(e.target.value)}
-              placeholder="Filter queue..."
+              placeholder="Search queue..."
               className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-electric"
             />
           </div>
 
           {/* Queue List */}
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
             {filteredQueue.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <p className="text-xs font-bold text-slate-600">Queue is empty</p>
+              <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <p className="text-xs font-bold text-slate-600">No players in this tier</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Add or approve verified players in Player Registrations to see them in this calling queue.
+                  {selectedTierFilter !== 'all'
+                    ? 'All players in this tier have been called or sold.'
+                    : 'Add or approve verified players in Player Registrations to see them in this calling queue.'}
                 </p>
               </div>
             ) : (
               filteredQueue.map((p, idx) => {
                 const tier = store.getPlayerTier(p);
                 const isCurrent = p.id === store.auctionState.currentPlayerId;
+                const prevPlayer = idx > 0 ? filteredQueue[idx - 1] : null;
+                const prevTier = prevPlayer ? store.getPlayerTier(prevPlayer) : null;
+                const showTierHeader = selectedTierFilter === 'all' && (!prevTier || prevTier.id !== tier.id);
 
                 return (
-                  <div
-                    key={p.id}
-                    onClick={() => handleCallPlayer(p.id)}
-                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
-                      isCurrent
-                        ? 'border-electric bg-electric/10 ring-2 ring-electric/30 shadow-md'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <span className="font-mono text-[10px] font-bold text-slate-400">
-                        #{idx + 1}
-                      </span>
-                      <img
-                        src={p.photoUrl}
-                        alt={p.fullName}
-                        className="w-8 h-8 rounded-lg object-cover border"
-                      />
-                      <div>
-                        <p className="font-bold text-slate-900 leading-tight">{p.fullName}</p>
-                        <span className="text-[10px] text-slate-500">{p.playingRole}</span>
+                  <React.Fragment key={p.id}>
+                    {showTierHeader && (
+                      <div className="pt-2 pb-1 first:pt-0">
+                        <div className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-100/90 border border-slate-200">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                            {tier.name}
+                          </span>
+                          <span className="text-[9px] font-mono font-bold text-slate-500">
+                            Base ₹{tier.minBid.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <div
+                      onClick={() => handleCallPlayer(p.id)}
+                      className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex items-center justify-between ${
+                        isCurrent
+                          ? 'border-electric bg-electric/10 ring-2 ring-electric/30 shadow-md'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <span className="font-mono text-[10px] font-bold text-slate-400">
+                          #{idx + 1}
+                        </span>
+                        <img
+                          src={p.photoUrl}
+                          alt={p.fullName}
+                          className="w-8 h-8 rounded-lg object-cover border"
+                        />
+                        <div>
+                          <p className="font-bold text-slate-900 leading-tight">{p.fullName}</p>
+                          <span className="text-[10px] text-slate-500">{p.playingRole}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 block">
+                          {tier.name.split('—')[0]}
+                        </span>
+                        <span className="text-[10px] font-bold text-electric">
+                          ₹{(tier.minBid / 1000).toFixed(0)}K
+                        </span>
                       </div>
                     </div>
-
-                    <div className="text-right">
-                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 block">
-                        {tier.name.split('—')[0]}
-                      </span>
-                      <span className="text-[10px] font-bold text-electric">
-                        ₹{(tier.minBid / 1000).toFixed(0)}K
-                      </span>
-                    </div>
-                  </div>
+                  </React.Fragment>
                 );
               })
             )}
