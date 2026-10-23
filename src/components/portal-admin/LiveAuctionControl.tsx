@@ -322,8 +322,15 @@ export const LiveAuctionControl: React.FC = () => {
                         <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 block">
                           {tier.name.split('—')[0]}
                         </span>
-                        <span className="text-[10px] font-bold text-electric">
-                          ₹{(tier.minBid / 1000).toFixed(0)}K
+                        <span
+                          className="text-[10px] font-bold text-electric"
+                          title={`₹${tier.minBid.toLocaleString('en-IN')}`}
+                        >
+                          {tier.minBid >= 10000000
+                            ? `₹${(tier.minBid / 10000000).toFixed(tier.minBid % 10000000 === 0 ? 0 : 1)} Cr`
+                            : tier.minBid >= 100000
+                            ? `₹${(tier.minBid / 100000).toFixed(0)} L`
+                            : `₹${(tier.minBid / 1000).toFixed(0)}K`}
                         </span>
                       </div>
                     </div>
@@ -465,7 +472,10 @@ export const LiveAuctionControl: React.FC = () => {
                   <option value="">-- Choose Team to Place Bid --</option>
                   {store.teams.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.logo} {t.name} (Purse: ₹{(t.remainingPurse / 100000).toFixed(1)}L)
+                      {t.logo} {t.name} (Purse: ₹
+                      {t.remainingPurse >= 10000000
+                        ? `${(t.remainingPurse / 10000000).toFixed(1)}Cr`
+                        : `${(t.remainingPurse / 100000).toFixed(1)}L`})
                     </option>
                   ))}
                 </select>

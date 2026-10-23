@@ -39,8 +39,8 @@ export const AuctionConfiguration: React.FC = () => {
       name: `Tier ${tiers.length + 1} — Custom`,
       minRating: 4.0,
       maxRating: 6.0,
-      minBid: 25000,
-      bidIncrement: 5000,
+      minBid: 5000000,
+      bidIncrement: 200000,
       priority: tiers.length + 1,
       badgeColor: 'bg-indigo-500 text-white border-indigo-400',
     };

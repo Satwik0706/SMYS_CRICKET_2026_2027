@@ -30,7 +30,7 @@ import {
 
 const STORAGE_KEY_PLAYERS = 'smys_players_v2';
 const STORAGE_KEY_TEAMS = 'smys_teams_v2';
-const STORAGE_KEY_TIERS = 'smys_tiers_v2';
+const STORAGE_KEY_TIERS = 'smys_tiers_v3';
 const STORAGE_KEY_CONFIG = 'smys_config_v2';
 const STORAGE_KEY_AUCTION = 'smys_auction_state_v2';
 const STORAGE_KEY_BIDS = 'smys_bids_v2';
@@ -181,7 +181,14 @@ export class TournamentStore {
           this.teams = res.data.teams;
         }
         if (res.data.tiers && res.data.tiers.length > 0) {
-          this.tiers = [...res.data.tiers].sort((a, b) => this.compareTiers(a, b));
+          const syncedTiers = res.data.tiers.map((t) => {
+            const defaultTier = INITIAL_TIERS.find((init) => init.id === t.id);
+            if (defaultTier && t.minBid < 5000000) {
+              return { ...t, minBid: defaultTier.minBid, bidIncrement: defaultTier.bidIncrement };
+            }
+            return t;
+          });
+          this.tiers = syncedTiers.sort((a, b) => this.compareTiers(a, b));
         }
         if (res.data.sales) {
           this.sales = res.data.sales;
@@ -595,7 +602,14 @@ export class TournamentStore {
 
       this.players = storedPlayers ? JSON.parse(storedPlayers) : [];
       this.teams = storedTeams ? JSON.parse(storedTeams) : [];
-      const rawTiers: AuctionTier[] = storedTiers ? JSON.parse(storedTiers) : [...INITIAL_TIERS];
+      let rawTiers: AuctionTier[] = storedTiers ? JSON.parse(storedTiers) : [...INITIAL_TIERS];
+      rawTiers = rawTiers.map((t) => {
+        const defaultTier = INITIAL_TIERS.find((init) => init.id === t.id);
+        if (defaultTier && t.minBid < 5000000) {
+          return { ...t, minBid: defaultTier.minBid, bidIncrement: defaultTier.bidIncrement };
+        }
+        return t;
+      });
       this.tiers = rawTiers.sort((a, b) => this.compareTiers(a, b));
       this.config = storedConfig ? JSON.parse(storedConfig) : { ...INITIAL_CONFIG };
       this.auctionState = storedAuction ? JSON.parse(storedAuction) : { ...this.auctionState };
@@ -1581,7 +1595,7 @@ export class TournamentStore {
     }
     const idx = this.tiers.findIndex((t) => t.id === tier.id);
     if (idx !== -1) return idx + 1;
-    if (tier.minBid) return 100000000 - tier.minBid;
+    if (tier.minBid) return 1000000000 - tier.minBid;
     return 999;
   }
 
