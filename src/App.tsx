@@ -7,6 +7,7 @@ import { AdminPortal } from './components/portal-admin/AdminPortal';
 import { PublicLiveAuction } from './components/portal-live/PublicLiveAuction';
 import { TeamPortal } from './components/portal-team/TeamPortal';
 import { PlayerPortal } from './components/portal-player/PlayerPortal';
+import { AuctionAdminPortal } from './components/portal-auction-admin/AuctionAdminPortal';
 import { Trophy, Lock, ShieldCheck } from 'lucide-react';
 import { useTournamentStore } from './hooks/useTournamentStore';
 
@@ -16,6 +17,9 @@ export function App() {
   const getInitialPortal = (): AppPortal => {
     const path = window.location.pathname.toLowerCase();
     if (path.includes('/register')) return 'register';
+    if (path.includes('/auction-admin') || path.includes('/auctioneer')) {
+      return store.isAuctionAdminAuthenticated() ? 'auction-admin' : 'gateway';
+    }
     if (path.includes('/admin')) {
       return store.isAdminAuthenticated() ? 'admin' : 'gateway';
     }
@@ -32,6 +36,11 @@ export function App() {
   const handleSelectPortal = (portal: AppPortal) => {
     // Route guards
     if (portal === 'admin' && !store.isAdminAuthenticated()) {
+      setCurrentPortal('gateway');
+      window.history.pushState(null, '', '/');
+      return;
+    }
+    if (portal === 'auction-admin' && !store.isAuctionAdminAuthenticated()) {
       setCurrentPortal('gateway');
       window.history.pushState(null, '', '/');
       return;
@@ -73,7 +82,7 @@ export function App() {
     };
   }, [currentPortal]);
 
-  const isDarkPortal = currentPortal === 'live';
+  const isDarkPortal = currentPortal === 'live' || currentPortal === 'auction-admin';
   const isPublicPortal = currentPortal === 'register' || currentPortal === 'correction' || currentPortal === 'player';
 
   return (
@@ -94,6 +103,9 @@ export function App() {
         )}
         {currentPortal === 'admin' && (
           <AdminPortal onLogout={() => handleSelectPortal('gateway')} />
+        )}
+        {currentPortal === 'auction-admin' && (
+          <AuctionAdminPortal onLogout={() => handleSelectPortal('gateway')} />
         )}
         {currentPortal === 'live' && <PublicLiveAuction />}
         {currentPortal === 'team' && (

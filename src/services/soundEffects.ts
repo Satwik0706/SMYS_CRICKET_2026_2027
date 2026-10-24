@@ -133,28 +133,71 @@ class SoundEffects {
     }
   }
 
-  // Unsold low double buzz
-  public playUnsold() {
+  // Unsold voice and sorrowful "Oh no!" sound
+  public playUnsold(playerName?: string) {
+    // 1. Spoken vocal announcement: "Oh no!" using Web Speech API
+    if (!this.isMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const text = playerName ? `Oh no! ${playerName} is unsold!` : 'Oh no! Unsold!';
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 0.85; // Lamenting / disappointed tone
+        utterance.volume = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        const englishVoice =
+          voices.find((v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('David') || v.name.includes('Zira'))) ||
+          voices.find((v) => v.lang.startsWith('en')) ||
+          voices[0];
+
+        if (englishVoice) {
+          utterance.voice = englishVoice;
+        }
+
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('Speech synthesis notice:', err);
+      }
+    }
+
+    // 2. Synthesized "Oh - Nooo" 2-tone descending sorrowful audio cadence
     const ctx = this.getContext();
     if (!ctx) return;
 
     try {
       const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
 
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(130, now);
-      osc.frequency.linearRampToValueAtTime(95, now + 0.4);
+      // Syllable 1: "Oh..." (340Hz dropping to 290Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(340, now);
+      osc1.frequency.exponentialRampToValueAtTime(280, now + 0.28);
 
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      gain1.gain.setValueAtTime(0.35, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.32);
 
-      osc.start(now);
-      osc.stop(now + 0.46);
+      // Syllable 2: "...Noooo" (240Hz dropping down to 140Hz with sorrowful slide)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(240, now + 0.32);
+      osc2.frequency.exponentialRampToValueAtTime(140, now + 0.85);
+
+      gain2.gain.setValueAtTime(0.001, now + 0.32);
+      gain2.gain.linearRampToValueAtTime(0.4, now + 0.36);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.32);
+      osc2.stop(now + 0.92);
     } catch {
       // Audio error suppressed
     }

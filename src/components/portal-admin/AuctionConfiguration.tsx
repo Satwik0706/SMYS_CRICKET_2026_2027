@@ -21,6 +21,9 @@ export const AuctionConfiguration: React.FC = () => {
   const [date, setDate] = useState(store.config.date);
   const [timerSeconds, setTimerSeconds] = useState(store.config.timerSeconds);
   const [unsoldRule, setUnsoldRule] = useState(store.config.unsoldRecallRule);
+  const [callingPreference, setCallingPreference] = useState<'random' | 'tier'>(
+    store.config.callingPreference || 'random'
+  );
   const [allowPublicQueue, setAllowPublicQueue] = useState(store.config.allowPublicQueue);
 
   // Tiers copy for editing
@@ -63,6 +66,7 @@ export const AuctionConfiguration: React.FC = () => {
       date,
       timerSeconds: Number(timerSeconds),
       unsoldRecallRule: unsoldRule,
+      callingPreference,
       allowPublicQueue,
     });
     store.updateTiers(tiers);
@@ -168,6 +172,18 @@ export const AuctionConfiguration: React.FC = () => {
               <option value="end_of_round">Recall at End of Round (Recommended)</option>
               <option value="immediate">Immediate Re-auction</option>
               <option value="manual">Manual Recall by Auctioneer</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Calling Order Preference</label>
+            <select
+              value={callingPreference}
+              onChange={(e) => setCallingPreference(e.target.value as 'random' | 'tier')}
+              className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-bold focus:ring-2 focus:ring-electric bg-white"
+            >
+              <option value="random">Random Calling (Across Available Tiers)</option>
+              <option value="tier">Tier-Wise Order (Tier 1 -&gt; Tier 4)</option>
             </select>
           </div>
 

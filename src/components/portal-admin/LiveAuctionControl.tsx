@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   RotateCcw,
+  Shuffle,
 } from 'lucide-react';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
 import { PlayerRegistration, Team } from '../../types';
@@ -179,28 +180,44 @@ export const LiveAuctionControl: React.FC = () => {
             <div>
               <div className="flex items-center space-x-1.5">
                 <h3 className="font-extrabold text-sm text-slate-900">Calling Queue</h3>
-                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-tight">
-                  Tier-Ranked
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextMode = store.config.callingPreference === 'tier' ? 'random' : 'tier';
+                    store.updateConfig({ callingPreference: nextMode });
+                  }}
+                  className={`text-[9px] font-black px-1.5 py-0.5 rounded border uppercase tracking-tight flex items-center space-x-1 transition cursor-pointer ${
+                    store.config.callingPreference === 'tier'
+                      ? 'bg-blue-100 text-blue-800 border-blue-300'
+                      : 'bg-amber-100 text-amber-800 border-amber-300'
+                  }`}
+                  title="Click to toggle between Random and Tier-Ranked Calling"
+                >
+                  <Shuffle className="w-2.5 h-2.5" />
+                  <span>{store.config.callingPreference === 'tier' ? 'Tier-Ranked' : 'Random Mode'}</span>
+                </button>
               </div>
               <p className="text-[11px] text-slate-400">
-                {eligibleQueue.length} in pool • Higher tier first
+                {eligibleQueue.length} in pool • {store.config.callingPreference === 'tier' ? 'Higher tier first' : 'Random across tiers'}
               </p>
             </div>
             <button
               onClick={handleCallNext}
-              className="text-[11px] bg-electric/10 text-electric hover:bg-electric hover:text-white px-2.5 py-1 rounded-lg font-bold transition-all shadow-sm"
-              title="Call next player according to higher tier priority"
+              className="text-[11px] bg-electric/10 text-electric hover:bg-electric hover:text-white px-2.5 py-1 rounded-lg font-bold transition-all shadow-sm flex items-center space-x-1"
+              title="Call next player according to active preference"
             >
-              Call Next →
+              <span>Call Next</span>
+              <span>→</span>
             </button>
           </div>
 
-          {/* Tier Call Hierarchy Notice */}
+          {/* Tier Call Hierarchy / Mode Notice */}
           <div className="mb-2 p-2 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between">
             <span className="font-semibold flex items-center gap-1 text-[10px] text-slate-500 uppercase tracking-wider">
-              <span>⚡ Priority:</span>
-              <strong className="text-slate-800">Tier 1 → Tier 4</strong>
+              <span>⚡ Mode:</span>
+              <strong className="text-slate-800">
+                {store.config.callingPreference === 'tier' ? 'Tier 1 → Tier 4' : 'Random Across Tiers (Unsold at End)'}
+              </strong>
             </span>
             {nextTierOnDeck && (
               <span className="text-[10px] font-bold text-electric">

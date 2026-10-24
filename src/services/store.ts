@@ -40,6 +40,8 @@ const STORAGE_KEY_TEAM_AUTH = 'smys_active_team_auth_v2';
 const STORAGE_KEY_ADMIN_CREDS = 'smys_admin_credentials_v2';
 const STORAGE_KEY_ADMIN_AUTH = 'smys_admin_auth_v2';
 const STORAGE_KEY_PLAYER_AUTH = 'smys_active_player_auth_v2';
+const STORAGE_KEY_UNSOLD = 'smys_unsold_players_v2';
+const STORAGE_KEY_AUCTION_ADMIN_AUTH = 'smys_auction_admin_auth_v2';
 
 function safeSync(operation: PromiseLike<unknown> | Promise<unknown>) {
   try {
@@ -81,7 +83,9 @@ export class TournamentStore {
   public adminId: string = (import.meta.env.VITE_ADMIN_ID || 'admin').trim();
   public adminPasswordHash: string = (import.meta.env.VITE_ADMIN_PASSWORD || 'admin123').trim();
   public isAdminAuth: boolean = false;
+  public isAuctionAdminAuth: boolean = false;
   public activePlayerId: string | null = null;
+  public unsoldPlayerIds: string[] = [];
 
   private constructor() {
     this.loadFromStorage();
@@ -105,6 +109,10 @@ export class TournamentStore {
       const savedAdminAuth = localStorage.getItem(STORAGE_KEY_ADMIN_AUTH);
       if (savedAdminAuth === 'true') {
         this.isAdminAuth = true;
+      }
+      const savedAuctionAdminAuth = localStorage.getItem(STORAGE_KEY_AUCTION_ADMIN_AUTH);
+      if (savedAuctionAdminAuth === 'true') {
+        this.isAuctionAdminAuth = true;
       }
       const savedPlayer = localStorage.getItem(STORAGE_KEY_PLAYER_AUTH);
       if (savedPlayer) {
@@ -566,6 +574,7 @@ export class TournamentStore {
       localStorage.setItem(STORAGE_KEY_BIDS, JSON.stringify(this.bids));
       localStorage.setItem(STORAGE_KEY_SALES, JSON.stringify(this.sales));
       localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(this.auditLogs));
+      localStorage.setItem(STORAGE_KEY_UNSOLD, JSON.stringify(this.unsoldPlayerIds));
     } catch (e) {
       console.warn('Storage save error:', e);
     }
@@ -582,6 +591,7 @@ export class TournamentStore {
           bids: this.bids,
           sales: this.sales,
           auditLogs: this.auditLogs,
+          unsoldPlayerIds: this.unsoldPlayerIds,
         },
       });
     }
@@ -599,6 +609,7 @@ export class TournamentStore {
       const storedBids = localStorage.getItem(STORAGE_KEY_BIDS);
       const storedSales = localStorage.getItem(STORAGE_KEY_SALES);
       const storedLogs = localStorage.getItem(STORAGE_KEY_LOGS);
+      const storedUnsold = localStorage.getItem(STORAGE_KEY_UNSOLD);
 
       this.players = storedPlayers ? JSON.parse(storedPlayers) : [];
       this.teams = storedTeams ? JSON.parse(storedTeams) : [];
@@ -615,6 +626,7 @@ export class TournamentStore {
       this.auctionState = storedAuction ? JSON.parse(storedAuction) : { ...this.auctionState };
       this.bids = storedBids ? JSON.parse(storedBids) : [];
       this.sales = storedSales ? JSON.parse(storedSales) : [];
+      this.unsoldPlayerIds = storedUnsold ? JSON.parse(storedUnsold) : [];
       this.auditLogs = storedLogs
         ? JSON.parse(storedLogs)
         : [
@@ -651,6 +663,7 @@ export class TournamentStore {
     if (payload.bids) this.bids = payload.bids;
     if (payload.sales) this.sales = payload.sales;
     if (payload.auditLogs) this.auditLogs = payload.auditLogs;
+    if (payload.unsoldPlayerIds) this.unsoldPlayerIds = payload.unsoldPlayerIds;
     this.notify();
   }
 
@@ -664,6 +677,7 @@ export class TournamentStore {
       bids: this.bids,
       sales: this.sales,
       auditLogs: this.auditLogs,
+      unsoldPlayerIds: this.unsoldPlayerIds,
     };
   }
 
@@ -1396,6 +1410,32 @@ export class TournamentStore {
     return this.isAdminAuth;
   }
 
+  // --- Auction Admin Portal Authentication (key: satu, appword: satu07) ---
+
+  public loginAuctionAdmin(key: string, appword: string): { success: boolean; message: string } {
+    const cleanKey = key.trim().toLowerCase();
+    const cleanPass = appword.trim();
+    if (cleanKey === 'satu' && cleanPass === 'satu07') {
+      this.isAuctionAdminAuth = true;
+      localStorage.setItem(STORAGE_KEY_AUCTION_ADMIN_AUTH, 'true');
+      this.addAuditLog('Auction Master Login', 'satu', 'Auction Master Satu authenticated into Auction Admin Portal');
+      this.notify();
+      return { success: true, message: 'Welcome Master Satu! Auction Admin verified.' };
+    }
+    return { success: false, message: 'Invalid Auction Key or Appword! (Key: satu, Appword: satu07)' };
+  }
+
+  public logoutAuctionAdmin() {
+    this.isAuctionAdminAuth = false;
+    localStorage.removeItem(STORAGE_KEY_AUCTION_ADMIN_AUTH);
+    this.addAuditLog('Auction Master Logged Out', 'satu', 'Auction Master signed out');
+    this.notify();
+  }
+
+  public isAuctionAdminAuthenticated(): boolean {
+    return this.isAuctionAdminAuth;
+  }
+
   // --- Player Self-Service Authentication & Session ---
 
   public loginPlayer(query: string): { success: boolean; message: string; player?: PlayerRegistration } {
@@ -1646,8 +1686,33 @@ export class TournamentStore {
     return matched || this.tiers[this.tiers.length - 1] || INITIAL_TIERS[0];
   }
 
+  public getUncalledPlayers(filterTierId?: string): PlayerRegistration[] {
+    const soldPlayerIds = new Set(this.sales.map((s) => s.playerId));
+    const unsoldSet = new Set(this.unsoldPlayerIds);
+    let list = this.players.filter(
+      (p) => p.status === 'verified' && !soldPlayerIds.has(p.id) && !unsoldSet.has(p.id)
+    );
+    if (filterTierId && filterTierId !== 'all') {
+      list = list.filter((p) => this.getPlayerTier(p).id === filterTierId);
+    }
+    return list;
+  }
+
+  public getUnsoldPlayers(filterTierId?: string): PlayerRegistration[] {
+    const soldPlayerIds = new Set(this.sales.map((s) => s.playerId));
+    const unsoldSet = new Set(this.unsoldPlayerIds);
+    let list = this.players.filter(
+      (p) => p.status === 'verified' && !soldPlayerIds.has(p.id) && unsoldSet.has(p.id)
+    );
+    if (filterTierId && filterTierId !== 'all') {
+      list = list.filter((p) => this.getPlayerTier(p).id === filterTierId);
+    }
+    return list;
+  }
+
   public getEligibleQueue(filterTierId?: string): PlayerRegistration[] {
     const soldPlayerIds = new Set(this.sales.map((s) => s.playerId));
+    const unsoldSet = new Set(this.unsoldPlayerIds);
     let eligible = this.players.filter(
       (p) => p.status === 'verified' && !soldPlayerIds.has(p.id)
     );
@@ -1656,8 +1721,17 @@ export class TournamentStore {
       eligible = eligible.filter((p) => this.getPlayerTier(p).id === filterTierId);
     }
 
-    // STRICT CALLING QUEUE ORDER: Higher Tier to Lower Tier (regardless of registration time)
+    // STRICT CALLING QUEUE ORDER:
+    // 1. Uncalled players FIRST.
+    // 2. Unsold players classed at the END.
+    // 3. Higher Tier to Lower Tier (Tier 1 -> Tier 2 -> Tier 3 -> Tier 4).
     return [...eligible].sort((a, b) => {
+      const aIsUnsold = unsoldSet.has(a.id);
+      const bIsUnsold = unsoldSet.has(b.id);
+      if (aIsUnsold !== bIsUnsold) {
+        return aIsUnsold ? 1 : -1; // Uncalled first, unsold at the end!
+      }
+
       const tierA = this.getPlayerTier(a);
       const tierB = this.getPlayerTier(b);
 
@@ -1725,12 +1799,82 @@ export class TournamentStore {
     }
   }
 
-  public callNextEligiblePlayer(targetTierId?: string) {
-    const eligible = this.getEligibleQueue(targetTierId);
-    const nextList = eligible.filter((p) => p.id !== this.auctionState.currentPlayerId);
-    if (nextList.length > 0) {
-      this.callPlayer(nextList[0].id, 'queue');
+  public callNextPlayer(
+    callingPreference: 'random' | 'tier' = 'random',
+    targetTierId?: string
+  ): { success: boolean; message: string; player?: PlayerRegistration; isUnsoldRound?: boolean } {
+    // 1. Call uncalled players first!
+    const uncalled = this.getUncalledPlayers(targetTierId);
+    const eligibleUncalled = uncalled.filter((p) => p.id !== this.auctionState.currentPlayerId);
+
+    if (eligibleUncalled.length > 0) {
+      let selected: PlayerRegistration;
+      if (callingPreference === 'random') {
+        const randomIndex = Math.floor(Math.random() * eligibleUncalled.length);
+        selected = eligibleUncalled[randomIndex];
+      } else {
+        const sorted = [...eligibleUncalled].sort((a, b) => {
+          const tierComparison = this.compareTiers(this.getPlayerTier(a), this.getPlayerTier(b));
+          if (tierComparison !== 0) return tierComparison;
+          return this.getPlayerMaxRating(b) - this.getPlayerMaxRating(a);
+        });
+        selected = sorted[0];
+      }
+
+      this.callPlayer(selected.id, 'queue');
+      return {
+        success: true,
+        message: `Called ${selected.fullName} from ${this.getPlayerTier(selected).name}`,
+        player: selected,
+        isUnsoldRound: false,
+      };
     }
+
+    // 2. All uncalled players exhausted! Class unsold players at the end:
+    const unsold = this.getUnsoldPlayers(targetTierId);
+    const eligibleUnsold = unsold.filter((p) => p.id !== this.auctionState.currentPlayerId);
+
+    if (eligibleUnsold.length > 0) {
+      let selected: PlayerRegistration;
+      if (callingPreference === 'random') {
+        const randomIndex = Math.floor(Math.random() * eligibleUnsold.length);
+        selected = eligibleUnsold[randomIndex];
+      } else {
+        const sorted = [...eligibleUnsold].sort((a, b) => {
+          const tierComparison = this.compareTiers(this.getPlayerTier(a), this.getPlayerTier(b));
+          if (tierComparison !== 0) return tierComparison;
+          return this.getPlayerMaxRating(b) - this.getPlayerMaxRating(a);
+        });
+        selected = sorted[0];
+      }
+
+      this.callPlayer(selected.id, 'queue');
+      return {
+        success: true,
+        message: `Unsold Pool Round: Recalled ${selected.fullName} to the floor!`,
+        player: selected,
+        isUnsoldRound: true,
+      };
+    }
+
+    return { success: false, message: 'All players in this pool have been auctioned and completed!' };
+  }
+
+  public callNextEligiblePlayer(targetTierId?: string) {
+    const pref = this.config.callingPreference || 'random';
+    this.callNextPlayer(pref, targetTierId);
+  }
+
+  public placeBidWithIncrement(teamId: string, incrementAmount?: number): { success: boolean; message: string } {
+    const player = this.players.find((p) => p.id === this.auctionState.currentPlayerId);
+    if (!player) return { success: false, message: 'No active player in auction' };
+    const tier = this.getPlayerTier(player);
+    const inc = incrementAmount && incrementAmount > 0 ? incrementAmount : (tier.bidIncrement || 10000);
+    const targetBid =
+      this.auctionState.currentBidderTeamId === null
+        ? this.auctionState.currentBid
+        : this.auctionState.currentBid + inc;
+    return this.placeBid(teamId, targetBid);
   }
 
   public placeBid(teamId: string, customAmount?: number): { success: boolean; message: string } {
@@ -1875,7 +2019,11 @@ export class TournamentStore {
     this.auctionState.status = 'unsold';
     this.auctionState.isTimerRunning = false;
 
-    sound.playUnsold();
+    if (!this.unsoldPlayerIds.includes(player.id)) {
+      this.unsoldPlayerIds.push(player.id);
+    }
+
+    sound.playUnsold(player.fullName);
     this.addAuditLog('Player UNSOLD', 'Auctioneer', `${player.fullName} (${player.regNumber}) went unsold`);
     this.saveToStorage();
     this.broadcastRealtime('PLAYER_UNSOLD', this.auctionState);
@@ -1985,6 +2133,7 @@ export class TournamentStore {
     team.remainingPurse = Math.max(0, team.initialPurse - team.spentPurse);
     team.playersCount += 1;
     player.assignedTeamId = team.id;
+    this.unsoldPlayerIds = this.unsoldPlayerIds.filter((id) => id !== player.id);
 
     this.auctionState.status = 'sold';
     this.auctionState.isTimerRunning = false;

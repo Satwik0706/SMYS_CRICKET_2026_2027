@@ -16,6 +16,7 @@ import {
   Zap,
   UserCheck,
   Phone,
+  Gavel,
 } from 'lucide-react';
 import { AppPortal } from '../../types';
 import { useTournamentStore } from '../../hooks/useTournamentStore';
@@ -24,7 +25,7 @@ interface PortalGatewayProps {
   onNavigate: (portal: AppPortal) => void;
 }
 
-type SelectedRole = '' | 'admin' | 'team' | 'live' | 'register' | 'player';
+type SelectedRole = '' | 'admin' | 'auction-admin' | 'team' | 'live' | 'register' | 'player';
 
 export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
   const store = useTournamentStore();
@@ -47,6 +48,12 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
   const [playerPhoneInput, setPlayerPhoneInput] = useState('');
   const [playerError, setPlayerError] = useState<string | null>(null);
 
+  // Auction Admin (satu / satu07) states
+  const [auctionKeyInput, setAuctionKeyInput] = useState('satu');
+  const [auctionPassInput, setAuctionPassInput] = useState('satu07');
+  const [showAuctionPass, setShowAuctionPass] = useState(true);
+  const [auctionError, setAuctionError] = useState<string | null>(null);
+
   const isAuctionLive = store.auctionState.status === 'bidding';
   const verifiedPlayersCount = store.players.filter((p) => p.status === 'verified').length;
   const totalTeamsCount = store.teams.length;
@@ -59,6 +66,17 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
       onNavigate('admin');
     } else {
       setAdminError(res.message);
+    }
+  };
+
+  const handleAuctionAdminSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuctionError(null);
+    const res = store.loginAuctionAdmin(auctionKeyInput, auctionPassInput);
+    if (res.success) {
+      onNavigate('auction-admin');
+    } else {
+      setAuctionError(res.message);
     }
   };
 
@@ -161,13 +179,42 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
               </span>
             </div>
 
-            {/* Quick 5-Tab Switcher for High Speed UI */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+            {/* Quick 6-Tab Switcher for High Speed UI */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRole('auction-admin');
+                  setAdminError(null);
+                  setAuctionError(null);
+                  setTeamError(null);
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between ${
+                  selectedRole === 'auction-admin'
+                    ? 'bg-amber-500/15 border-amber-500 text-amber-950 shadow-sm ring-2 ring-amber-400/50'
+                    : 'bg-[#FAF7F2] border-[#E8E1D3] text-slate-600 hover:bg-white hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className={`p-1.5 rounded-lg ${selectedRole === 'auction-admin' ? 'bg-gradient-to-br from-amber-500 to-yellow-600 text-midnight-950 font-black' : 'bg-slate-200/60 text-slate-500'}`}>
+                    <Gavel className="w-4 h-4" />
+                  </div>
+                  {selectedRole === 'auction-admin' && (
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${selectedRole === 'auction-admin' ? 'text-amber-900 font-black' : 'text-slate-800'}`}>Auction Admin</div>
+                  <div className="text-[10px] text-slate-500">Master Satu Console</div>
+                </div>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
                   setSelectedRole('admin');
                   setAdminError(null);
+                  setAuctionError(null);
                   setTeamError(null);
                 }}
                 className={`p-3 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between ${
@@ -414,6 +461,104 @@ export const PortalGateway: React.FC<PortalGatewayProps> = ({ onNavigate }) => {
                 >
                   <LogIn className="w-4 h-4 text-gold" />
                   <span>Authenticate & Enter Admin Centre</span>
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* 1.5 AUCTION ADMIN (SATU / SATU07) SELECTED */}
+          {selectedRole === 'auction-admin' && (
+            <div className="bg-[#FCFAF6] rounded-2xl border border-amber-300 p-6 space-y-5 animate-fadeIn shadow-md ring-2 ring-amber-400/30">
+              <div className="flex items-center space-x-3 pb-3 border-b border-[#E8E2D6]">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center text-midnight-950 font-black shadow-md">
+                  <Gavel className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-base font-black text-slate-900 uppercase">Auction Admin Master Portal</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-black bg-amber-500 text-midnight-950">
+                      KEY: SATU
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Live calling console with random across tiers, franchise card tapping budget increments, and unsold pool queuing.
+                  </p>
+                </div>
+              </div>
+
+              {auctionError && (
+                <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-bold flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{auctionError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAuctionAdminSubmit} className="space-y-4 text-xs">
+                {/* Key Input */}
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Auction Master Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={auctionKeyInput}
+                      onChange={(e) => setAuctionKeyInput(e.target.value)}
+                      placeholder="Enter Key (satu)"
+                      className="w-full p-3.5 pl-10 rounded-xl bg-white border border-[#D6CEC0] text-slate-900 font-mono text-sm focus:outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-500/20 transition-all shadow-sm font-bold"
+                    />
+                    <div className="absolute left-3.5 top-3.5 text-amber-600">
+                      <Gavel className="w-4 h-4" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Appword Input */}
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Master Appword
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showAuctionPass ? 'text' : 'password'}
+                      required
+                      value={auctionPassInput}
+                      onChange={(e) => setAuctionPassInput(e.target.value)}
+                      placeholder="Enter Appword (satu07)"
+                      className="w-full p-3.5 pl-10 pr-12 rounded-xl bg-white border border-[#D6CEC0] text-slate-900 font-mono text-sm focus:outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-500/20 transition-all shadow-sm font-bold"
+                    />
+                    <div className="absolute left-3.5 top-3.5 text-amber-600">
+                      <Lock className="w-4 h-4" />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAuctionPass(!showAuctionPass)}
+                      className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-700 transition-colors"
+                      title={showAuctionPass ? 'Mask appword (*)' : 'Show appword'}
+                    >
+                      {showAuctionPass ? (
+                        <Eye className="w-4 h-4 text-amber-600" />
+                      ) : (
+                        <EyeOff className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Credential Hint */}
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 text-[11px] font-bold flex items-center justify-between">
+                  <span>Authorized Credentials:</span>
+                  <span className="font-mono text-amber-800">Key: <strong className="underline">satu</strong> • Appword: <strong className="underline">satu07</strong></span>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-midnight-950 font-black text-xs uppercase tracking-wider shadow-md shadow-amber-500/30 hover:brightness-105 active:scale-95 transition-all flex items-center justify-center space-x-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Enter Auction Admin Master Console</span>
                 </button>
               </form>
             </div>

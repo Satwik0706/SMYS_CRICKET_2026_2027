@@ -57,6 +57,7 @@ export const INITIAL_CONFIG: AuctionConfig = {
   status: 'live',
   timerSeconds: 30,
   unsoldRecallRule: 'end_of_round',
+  callingPreference: 'random',
   allowPublicQueue: true,
   activeTierId: 'tier-elite',
 };

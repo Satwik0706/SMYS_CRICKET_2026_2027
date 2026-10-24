@@ -14,6 +14,7 @@ import {
   Lock,
   Home,
   User,
+  Gavel,
 } from 'lucide-react';
 import { AppPortal } from '../../types';
 import { sound } from '../../services/soundEffects';
@@ -38,11 +39,13 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
 
   const isLive = store.auctionState.status === 'bidding';
   const activeTeam = store.getActiveTeam();
-  const isDarkPortal = currentPortal === 'live' || currentPortal === 'gateway';
+  const isDarkPortal = currentPortal === 'live' || currentPortal === 'gateway' || currentPortal === 'auction-admin';
 
   const handleExitPortal = () => {
     if (currentPortal === 'admin') {
       store.logoutAdmin();
+    } else if (currentPortal === 'auction-admin') {
+      store.logoutAuctionAdmin();
     } else if (currentPortal === 'team') {
       store.logoutTeam();
     } else if (currentPortal === 'player' || currentPortal === 'correction') {
@@ -57,6 +60,16 @@ export const Header: React.FC<HeaderProps> = ({ currentPortal, onSelectPortal })
 
   const renderPortalBadge = () => {
     switch (currentPortal) {
+      case 'auction-admin':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-sm">
+            <Gavel className="w-3.5 h-3.5 text-gold" />
+            <span>Auction Master Console</span>
+            <span className="text-[10px] bg-gold/20 text-gold px-1.5 py-0.2 rounded-full font-mono">
+              satu
+            </span>
+          </div>
+        );
       case 'admin':
         return (
           <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-royal/20 border border-royal/40 text-royal-light text-xs font-bold">

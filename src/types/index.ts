@@ -87,6 +87,7 @@ export interface AuctionConfig {
   status: 'draft' | 'ready' | 'live' | 'paused' | 'completed';
   timerSeconds: number; // e.g. 30 seconds countdown
   unsoldRecallRule: 'immediate' | 'end_of_round' | 'manual';
+  callingPreference?: 'random' | 'tier';
   allowPublicQueue: boolean;
   activeTierId: string | null;
 }
@@ -141,4 +142,12 @@ export interface AuditLog {
   timestamp: string;
 }
 
-export type AppPortal = 'gateway' | 'register' | 'admin' | 'live' | 'team' | 'player' | 'correction';
+export type AppPortal =
+  | 'gateway'
+  | 'register'
+  | 'admin'
+  | 'live'
+  | 'team'
+  | 'player'
+  | 'correction'
+  | 'auction-admin';
